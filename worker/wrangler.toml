@@ -1,0 +1,33 @@
+name = "trae-token-watcher-api"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# D1 数据库 — 用户、session、配额
+[[d1_databases]]
+binding = "DB"
+database_name = "trae-token-watcher-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# KV — Star 状态缓存（TTL 24h）+ 诊断结果缓存
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# Secrets（通过 wrangler secret put 设置，不要写在这里）:
+#   GITHUB_CLIENT_ID     — GitHub OAuth App Client ID
+#   GITHUB_CLIENT_SECRET — GitHub OAuth App Client Secret
+#   DEEPSEEK_API_KEY     — 后端转发诊断用的 DeepSeek Key
+#   SESSION_SECRET       — session token 签名密钥（32+ 字节随机串）
+
+# 被监控的 GitHub 仓库（Star 即门票）
+[vars]
+WATCH_REPO_OWNER = "soulor8908"
+WATCH_REPO_NAME = "trae-token-watcher"
+DAILY_QUOTA = 10
+STAR_CACHE_TTL = 86400       # Star 状态缓存 24h（秒）
+DIAG_CACHE_TTL = 3600        # 诊断结果缓存 1h（秒）
+
+# 可观测性 — 结构化日志 + 采样追踪
+[observability]
+enabled = true
+head_sampling_rate = 0.1

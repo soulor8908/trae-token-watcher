@@ -1,5 +1,6 @@
-// Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 B）
+// Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 A 优先，回退 B）
 import { getSummary, getAllRecords, clearAllRecords } from '../lib/db.js';
+import { loginWithGitHub, logout, refreshAuthStatus, getSession, getApiBase, setApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
 
 // ---------- 工具函数 ----------
 function fmt(n) {
@@ -150,7 +151,7 @@ function renderRecords(records) {
     </div>`).join('');
 }
 
-// ---------- AI 诊断（路径 B）----------
+// ---------- AI 诊断（路径 A 优先，回退 B）----------
 const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 const STORAGE_KEY = 'ttw_deepseek_key';
 
@@ -158,7 +159,6 @@ async function loadApiKey() {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   if (result[STORAGE_KEY]) {
     document.getElementById('apiKey').value = result[STORAGE_KEY];
-    document.getElementById('diagHint').textContent = 'Key 已保存';
   }
 }
 
@@ -169,19 +169,42 @@ async function saveApiKey() {
     return;
   }
   await chrome.storage.local.set({ [STORAGE_KEY]: key });
-  document.getElementById('diagHint').textContent = '已保存';
+  document.getElementById('diagHint').textContent = 'Key 已保存';
+  await updateDiagModeTag();
+}
+
+async function loadApiBase() {
+  const base = await getApiBase();
+  if (base) document.getElementById('apiBase').value = base;
+}
+
+async function saveApiBase() {
+  const url = document.getElementById('apiBase').value.trim().replace(/\/$/, '');
+  await setApiBase(url);
+  document.getElementById('diagHint').textContent = url ? '后端地址已保存' : '已清空后端地址';
+  await updateDiagModeTag();
+  await renderAccount();
+}
+
+// 更新诊断模式标签
+async function updateDiagModeTag() {
+  const tag = document.getElementById('diagMode');
+  const session = await getSession();
+  const base = await getApiBase();
+  if (session && base) {
+    tag.textContent = '路径 A · 后端转发';
+    tag.className = 'tag tag-green';
+  } else {
+    tag.textContent = '路径 B · 自带 Key';
+    tag.className = 'tag tag-amber';
+  }
 }
 
 async function diagnose() {
   const key = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY];
   const resultEl = document.getElementById('diagResult');
   const btn = document.getElementById('diagBtn');
-
-  if (!key) {
-    resultEl.textContent = '请先保存 DeepSeek API Key';
-    resultEl.className = 'diag-result show error';
-    return;
-  }
+  const hintEl = document.getElementById('diagHint');
 
   const summary = await getSummary();
   if (summary.totalRecords === 0) {
@@ -194,42 +217,85 @@ async function diagnose() {
   resultEl.textContent = '正在分析您的 Token 用量…';
   resultEl.className = 'diag-result show loading';
 
-  // 只发送聚合统计，不包含任何对话内容
   const statsPayload = buildStatsPayload(summary);
 
+  // 先尝试路径 A（后端转发）
   try {
-    const resp = await fetch(DEEPSEEK_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: DIAGNOSE_SYSTEM_PROMPT },
-          { role: 'user', content: statsPayload },
-        ],
-        temperature: 0.7,
-        max_tokens: 1200,
-      }),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`API ${resp.status}: ${errText.slice(0, 200)}`);
+    const outcome = await diagnoseViaBackend(statsPayload);
+    if (outcome && outcome.result) {
+      const quotaInfo = outcome.quotaTotal
+        ? `\n\n[路径 A · ${outcome.cached ? '缓存命中' : '已用'} ${outcome.quotaUsed}/${outcome.quotaTotal}]`
+        : `\n\n[路径 A${outcome.cached ? ' · 缓存命中' : ''}]`;
+      resultEl.innerHTML = formatDiagnosis(outcome.result) + `<div class="diag-meta">${quotaInfo}</div>`;
+      resultEl.className = 'diag-result show';
+      hintEl.textContent = '';
+      return;
     }
+    // 路径 A 不可用，提示回退原因
+    if (outcome && outcome.fallback === 'B' && outcome.reason) {
+      hintEl.textContent = `路径 A 跳过：${outcome.reason}，尝试路径 B…`;
+    }
+  } catch (e) {
+    hintEl.textContent = `路径 A 失败：${e.message}，尝试路径 B…`;
+  }
 
-    const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content || '诊断完成，但未返回内容';
-    resultEl.innerHTML = formatDiagnosis(content);
+  // 回退路径 B（自有 Key 直连）
+  if (!key) {
+    resultEl.textContent = '后端诊断不可用，且未配置 DeepSeek API Key。请登录 Star 仓库，或在下方填入自有 Key。';
+    resultEl.className = 'diag-result show error';
+    return;
+  }
+
+  try {
+    const content = await diagnoseViaDeepSeek(key, statsPayload);
+    resultEl.innerHTML = formatDiagnosis(content) + '<div class="diag-meta">[路径 B · 自有 Key]</div>';
     resultEl.className = 'diag-result show';
+    hintEl.textContent = '';
   } catch (e) {
     resultEl.textContent = `诊断失败: ${e.message}`;
     resultEl.className = 'diag-result show error';
   } finally {
     btn.disabled = false;
   }
+}
+
+// 路径 A：通过后端转发
+async function diagnoseViaBackend(statsPayload) {
+  const outcome = await diagnoseViaApi(statsPayload);
+
+  if (outcome.result) {
+    return outcome;
+  }
+  // 需要回退
+  return { fallback: 'B', reason: outcome.reason || '后端不可用' };
+}
+
+// 路径 B：直连 DeepSeek
+async function diagnoseViaDeepSeek(key, statsPayload) {
+  const resp = await fetch(DEEPSEEK_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: DIAGNOSE_SYSTEM_PROMPT },
+        { role: 'user', content: statsPayload },
+      ],
+      temperature: 0.7,
+      max_tokens: 1200,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`API ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '诊断完成，但未返回内容';
 }
 
 function buildStatsPayload(summary) {
@@ -261,19 +327,64 @@ const DIAGNOSE_SYSTEM_PROMPT = `你是 TRAE Work 的 Token 优化专家。用户
 保持简洁，总字数控制在 300 字以内。`;
 
 function formatDiagnosis(text) {
-  // 简单格式化：加粗数字
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+// ---------- 账号区渲染 ----------
+async function renderAccount() {
+  const guest = document.getElementById('accountGuest');
+  const user = document.getElementById('accountUser');
+  const status = await refreshAuthStatus();
+
+  if (status.authenticated) {
+    guest.style.display = 'none';
+    user.style.display = 'flex';
+    document.getElementById('userLogin').textContent = status.login;
+    document.getElementById('userAvatar').src = status.avatar || '';
+
+    const starEl = document.getElementById('starStatus');
+    if (status.starred) {
+      starEl.className = 'account-star starred';
+      starEl.textContent = '★ 已 Star · 享免费诊断';
+    } else {
+      starEl.className = 'account-star not-starred';
+      starEl.innerHTML = '未 Star · <a href="https://github.com/soulor8908/trae-token-watcher" target="_blank">去 Star</a>';
+    }
+  } else {
+    guest.style.display = 'flex';
+    user.style.display = 'none';
+  }
+  await updateDiagModeTag();
 }
 
 // ---------- 事件绑定 ----------
 document.getElementById('refreshBtn').addEventListener('click', renderSummary);
 document.getElementById('saveKey').addEventListener('click', saveApiKey);
+document.getElementById('saveApiBase').addEventListener('click', saveApiBase);
 document.getElementById('diagBtn').addEventListener('click', diagnose);
 document.getElementById('apiKey').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') saveApiKey();
+});
+document.getElementById('apiBase').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') saveApiBase();
+});
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  try {
+    await loginWithGitHub();
+    window.close(); // 关闭 popup，让用户在打开的标签页完成授权
+  } catch (e) {
+    document.getElementById('loginHint').textContent = e.message;
+  }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await logout();
+  await renderAccount();
 });
 
 document.getElementById('clearBtn').addEventListener('click', async () => {
@@ -283,9 +394,18 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   }
 });
 
+// 监听 storage 变化（OAuth 回调页写入 session 后，popup 若开着能刷新）
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.ttw_session) {
+    renderAccount();
+  }
+});
+
 // ---------- 初始化 ----------
 (async function init() {
   await loadApiKey();
+  await loadApiBase();
+  await renderAccount();
   await renderSummary();
   // 每 5 秒刷新一次（popup 打开期间）
   setInterval(renderSummary, 5000);

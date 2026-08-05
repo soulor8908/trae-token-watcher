@@ -3,7 +3,7 @@
   "name": "Trae Token Watcher",
   "version": "0.1.0",
   "description": "监控 TRAE Work Token 消耗，AI 驱动积分优化建议",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://work.trae.cn/*",
     "https://www.trae.cn/*",

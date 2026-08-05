@@ -1,0 +1,21 @@
+{
+  "name": "trae-token-watcher-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker 后端 — GitHub OAuth + Star 校验 + 诊断转发",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute trae-token-watcher-db --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute trae-token-watcher-db --remote --file=./schema.sql",
+    "kv:create": "wrangler kv namespace create KV",
+    "secret:github-id": "wrangler secret put GITHUB_CLIENT_ID",
+    "secret:github-secret": "wrangler secret put GITHUB_CLIENT_SECRET",
+    "secret:deepseek": "wrangler secret put DEEPSEEK_API_KEY",
+    "secret:session": "wrangler secret put SESSION_SECRET"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  }
+}

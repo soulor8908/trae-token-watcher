@@ -20,6 +20,22 @@
     </div>
   </header>
 
+  <!-- 账号区：登录 / Star 状态 -->
+  <section class="account" id="accountSection">
+    <div class="account-guest" id="accountGuest">
+      <button class="btn btn-primary btn-block" id="loginBtn">用 GitHub 登录</button>
+      <div class="account-hint" id="loginHint">登录后 Star 仓库可享免费 AI 诊断</div>
+    </div>
+    <div class="account-user" id="accountUser" style="display:none">
+      <img class="avatar" id="userAvatar" alt="">
+      <div class="account-info">
+        <span class="account-login" id="userLogin"></span>
+        <span class="account-star" id="starStatus"></span>
+      </div>
+      <button class="btn btn-sm btn-ghost" id="logoutBtn">登出</button>
+    </div>
+  </section>
+
   <!-- 汇总卡片 -->
   <section class="summary-grid">
     <div class="stat-card">
@@ -66,8 +82,15 @@
       <span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span>
     </div>
 
-    <div class="diag-setup" id="diagSetup">
-      <input type="password" id="apiKey" class="input" placeholder="粘贴 DeepSeek API Key（sk-...）" autocomplete="off">
+    <!-- 后端配置（路径 A） -->
+    <div class="diag-setup" id="apiBaseSetup">
+      <input type="text" id="apiBase" class="input" placeholder="后端 API 地址（如 https://api.example.workers.dev）" autocomplete="off">
+      <button class="btn btn-sm" id="saveApiBase">保存</button>
+    </div>
+
+    <!-- DeepSeek Key（路径 B 回退） -->
+    <div class="diag-setup">
+      <input type="password" id="apiKey" class="input" placeholder="DeepSeek API Key（回退用，sk-...）" autocomplete="off">
       <button class="btn btn-sm" id="saveKey">保存</button>
     </div>
 
