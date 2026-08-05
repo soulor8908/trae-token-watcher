@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- 顶部状态栏 -->
+  <header class="header">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <span class="brand-name">Token Watcher</span>
+    </div>
+    <div class="status" id="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">等待数据</span>
+    </div>
+  </header>
+
+  <!-- 汇总卡片 -->
+  <section class="summary-grid">
+    <div class="stat-card">
+      <div class="stat-val" id="todayTotal" data-val="0">0</div>
+      <div class="stat-lbl">今日 Token</div>
+      <div class="stat-sub" id="todayCount">0 次请求</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val accent-blue" id="weekTotal" data-val="0">0</div>
+      <div class="stat-lbl">本周 Token</div>
+      <div class="stat-sub" id="weekCount">0 次请求</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-val accent-amber" id="monthTotal" data-val="0">0</div>
+      <div class="stat-lbl">本月 Token</div>
+      <div class="stat-sub" id="monthCount">0 次请求</div>
+    </div>
+  </section>
+
+  <!-- 趋势图 -->
+  <section class="section">
+    <div class="section-head">
+      <h3>14 天趋势</h3>
+      <div class="legend">
+        <span class="legend-item"><i class="dot-green"></i>输入</span>
+        <span class="legend-item"><i class="dot-blue"></i>输出</span>
+      </div>
+    </div>
+    <div class="chart" id="chart">
+      <div class="chart-empty">暂无趋势数据</div>
+    </div>
+  </section>
+
+  <!-- 模型分布 -->
+  <section class="section" id="modelSection" style="display:none">
+    <h3>模型分布</h3>
+    <div class="model-list" id="modelList"></div>
+  </section>
+
+  <!-- AI 诊断 -->
+  <section class="section">
+    <div class="section-head">
+      <h3>AI 诊断</h3>
+      <span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span>
+    </div>
+
+    <div class="diag-setup" id="diagSetup">
+      <input type="password" id="apiKey" class="input" placeholder="粘贴 DeepSeek API Key（sk-...）" autocomplete="off">
+      <button class="btn btn-sm" id="saveKey">保存</button>
+    </div>
+
+    <div class="diag-actions">
+      <button class="btn btn-primary" id="diagBtn">诊断我的 Token 用法</button>
+      <span class="hint" id="diagHint"></span>
+    </div>
+
+    <div class="diag-result" id="diagResult"></div>
+  </section>
+
+  <!-- 最近记录 -->
+  <section class="section">
+    <div class="section-head">
+      <h3>最近记录</h3>
+      <button class="btn btn-sm btn-ghost" id="refreshBtn">刷新</button>
+    </div>
+    <div class="records" id="records">
+      <div class="empty">暂无记录，打开 work.trae.cn 开始对话即可采集</div>
+    </div>
+  </section>
+
+  <!-- 底部 -->
+  <footer class="footer">
+    <button class="btn btn-sm btn-ghost" id="clearBtn">清空数据</button>
+    <a class="link" href="https://github.com/soulor8908/trae-token-watcher" target="_blank">GitHub</a>
+  </footer>
+
+</div>
+<script type="module" src="popup.js"></script>
+</body>
+</html>
