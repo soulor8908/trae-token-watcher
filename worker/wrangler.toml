@@ -6,12 +6,12 @@ compatibility_date = "2024-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "trae-token-watcher-db"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "4c09e164-82c1-4ff1-b67d-317684bf4b62"
 
 # KV — Star 状态缓存（TTL 24h）+ 诊断结果缓存
 [[kv_namespaces]]
-binding = "KV"
-id = "REPLACE_WITH_YOUR_KV_ID"
+binding = "TRAE_TOKEN_KV"
+id = "72864e45c2164530b082fc304d558d9a"
 
 # Secrets（通过 wrangler secret put 设置，不要写在这里）:
 #   GITHUB_CLIENT_ID     — GitHub OAuth App Client ID
