@@ -2,7 +2,7 @@
 // 数据流要短：content -> background -> IndexedDB；popup 直读 IndexedDB
 
 const DB_NAME = 'trae-token-watcher';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_RECORDS = 'usage-records';
 
 function openDB() {
@@ -18,11 +18,39 @@ function openDB() {
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('conversationId', 'conversationId', { unique: false });
         store.createIndex('model', 'model', { unique: false });
+        store.createIndex('clientId', 'clientId', { unique: false });
+      } else if (e.oldVersion < 2) {
+        // v1 → v2：补 clientId 索引 + 给旧记录回填 clientId
+        const store = e.target.transaction.objectStore(STORE_RECORDS);
+        if (!store.indexNames.contains('clientId')) {
+          store.createIndex('clientId', 'clientId', { unique: false });
+        }
+        // 回填旧记录的 clientId（用 id 生成确定性 uuid 替代）
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (cursor) {
+            const rec = cursor.value;
+            if (!rec.clientId) {
+              rec.clientId = genClientId();
+              cursor.update(rec);
+            }
+            cursor.continue();
+          }
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+// 生成客户端记录 ID（用于跨设备去重）
+function genClientId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 // 写入一条用量记录
@@ -41,6 +69,7 @@ export async function addRecord(record) {
       totalTokens: 0,
       url: '',
       source: 'fetch',
+      clientId: genClientId(),
       ...record,
     });
     req.onsuccess = () => resolve(req.result);
@@ -478,6 +507,110 @@ export async function clearAllRecords() {
     const store = tx.objectStore(STORE_RECORDS);
     const req = store.clear();
     req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// ---------- 同步相关 ----------
+// 按 id 增量读取（上传用）：返回 id > localId 的记录，升序
+export async function getRecordsAfterId(localId = 0, limit = 500) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    const range = IDBKeyRange.lowerBound(localId + 1, false);
+    const req = store.getAll(range, limit);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 批量导入记录（下载用）：按 clientId 去重，已存在则跳过
+// records: [{ clientId, ts, model, ... }]（server_created_at 字段会被忽略）
+export async function importRecords(records) {
+  if (!records || records.length === 0) return { imported: 0, skipped: 0 };
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readwrite');
+    const store = tx.objectStore(STORE_RECORDS);
+    const idx = store.index('clientId');
+    let imported = 0;
+    let skipped = 0;
+    let pending = records.length;
+
+    for (const r of records) {
+      const cid = r.clientId || r.client_id;
+      if (!cid) { skipped++; pending--; continue; }
+      const checkReq = idx.getKey(cid);
+      checkReq.onsuccess = () => {
+        if (checkReq.result == null) {
+          // 不存在，写入
+          store.add({
+            timestamp: r.ts || Date.now(),
+            conversationId: r.conversationId || r.conversation_id || null,
+            model: r.model || null,
+            inputTokens: r.inputTokens || r.input_tokens || 0,
+            outputTokens: r.outputTokens || r.output_tokens || 0,
+            cachedTokens: r.cachedTokens || r.cached_tokens || 0,
+            cacheWriteTokens: r.cacheWriteTokens || r.cache_write_tokens || 0,
+            totalTokens: r.totalTokens || r.total_tokens || 0,
+            url: r.url || '',
+            source: r.source || 'sync',
+            clientId: cid,
+            ...(r.remaining != null ? { remaining: r.remaining } : {}),
+            ...(r.credits != null ? { credits: r.credits } : {}),
+            ...(r.costMoney != null ? { costMoney: r.costMoney } : {}),
+            ...(r.userInputPreview != null ? { userInputPreview: r.userInputPreview } : {}),
+          });
+          imported++;
+        } else {
+          skipped++;
+        }
+        pending--;
+        if (pending === 0) {
+          tx.oncomplete = () => { db.close(); resolve({ imported, skipped }); };
+        }
+      };
+      checkReq.onerror = () => {
+        skipped++;
+        pending--;
+        if (pending === 0) {
+          tx.oncomplete = () => { db.close(); resolve({ imported, skipped }); };
+        }
+      };
+    }
+
+    // 兜底：如果没有 pending（空数组已在前面 return）
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// 总记录数（同步状态展示用）
+export async function countAllRecords() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    const req = store.count();
+    req.onsuccess = () => resolve(req.result || 0);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 最大本地 id（上传游标用）
+export async function getMaxLocalId() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    const req = store.openCursor(null, 'prev');
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      resolve(cursor ? cursor.value.id : 0);
+    };
     req.onerror = () => reject(req.error);
     tx.oncomplete = () => db.close();
   });

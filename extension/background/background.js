@@ -1,10 +1,13 @@
-// Background Service Worker — 数据写入中枢 + 消息路由 + 预警检查
+// Background Service Worker — 数据写入中枢 + 消息路由 + 预警检查 + 自动同步
 // 失败优雅：所有写入均 try/catch，不影响页面正常运行
 import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, checkAlert } from '../lib/db.js';
+import { sync, pull, push, getAutoSyncEnabled, canSync, resetLocalCursor } from '../lib/sync.js';
 
 const ALERT_ALARM = 'ttw-alert-check';
+const SYNC_ALARM = 'ttw-sync-periodic';
 const ALERT_NOTIF_ID = 'ttw-alert';
 const ALERT_COOLDOWN_MS = 3600000; // 每小时最多一次通知
+const SYNC_DEBOUNCE_MS = 30000;    // 写入后 30 秒上传
 
 // 消息路由表
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -46,8 +49,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
       return false;
+    case 'TTW_SYNC':
+      // 手动触发同步（来自 options 页）
+      (msg.payload?.only === 'pull' ? pull() : msg.payload?.only === 'push' ? push() : sync())
+        .then((r) => sendResponse({ ok: true, result: r }))
+        .catch((e) => sendResponse({ ok: false, error: e.message }));
+      return true;
+    case 'TTW_SYNC_RESET_CURSOR':
+      resetLocalCursor()
+        .then(() => sendResponse({ ok: true }))
+        .catch((e) => sendResponse({ ok: false, error: e.message }));
+      return true;
   }
 });
+
+// ---------- 自动同步 ----------
+let syncTimer = null;
+async function scheduleDebouncedSync() {
+  if (!(await getAutoSyncEnabled())) return;
+  if (!(await canSync())) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    runAutoSync();
+  }, SYNC_DEBOUNCE_MS);
+}
+
+async function runAutoSync() {
+  try {
+    if (!(await getAutoSyncEnabled()) || !(await canSync())) return;
+    await sync();
+    console.log('[trae-token-watcher] 自动同步完成');
+  } catch (e) {
+    console.warn('[trae-token-watcher] 自动同步失败', e.message);
+  }
+}
 
 // 写入用量记录并更新 badge
 async function handleUsage(payload, sender) {
@@ -72,6 +108,7 @@ async function handleUsage(payload, sender) {
     });
     refreshBadge();
     console.log('[trae-token-watcher] 记录:', payload.source, payload.totalTokens, 'tokens |', payload.model, '|', payload.url);
+    scheduleDebouncedSync();
   } catch (e) {
     console.warn('[trae-token-watcher] 写入失败', e);
   }
@@ -161,16 +198,20 @@ chrome.notifications.onClicked.addListener(() => {
   chrome.notifications.clear(ALERT_NOTIF_ID);
 });
 
-// 扩展安装时初始化 + 启动定时预警
+// 扩展安装时初始化 + 启动定时预警 + 定时同步
 chrome.runtime.onInstalled.addListener(() => {
   refreshBadge();
   // 每 15 分钟检查一次预警（alarm 最小间隔 1 分钟）
   chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 15 });
+  // 每 10 分钟拉取一次其他设备的记录
+  chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 10 });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALERT_ALARM) {
     runAlertCheck();
+  } else if (alarm.name === SYNC_ALARM) {
+    runAutoSync();
   }
 });
 

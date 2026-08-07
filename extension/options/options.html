@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Watcher · 设置</title>
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<div class="opt-app">
+
+  <header class="opt-header">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <span class="brand-name">Token Watcher · 设置</span>
+    </div>
+    <a class="link" href="https://github.com/soulor8908/trae-token-watcher" target="_blank">GitHub</a>
+  </header>
+
+  <!-- 账户 -->
+  <section class="opt-card">
+    <div class="opt-card-head"><h3>账户</h3><span class="hint" id="accountHint"></span></div>
+    <div class="opt-card-body">
+      <div class="account-guest" id="accountGuest">
+        <button class="btn btn-primary" id="loginBtn">用 GitHub 登录</button>
+        <div class="hint">登录后可跨设备同步、享免费 AI 诊断（需 Star 仓库）</div>
+      </div>
+      <div class="account-user" id="accountUser" style="display:none">
+        <img class="avatar" id="userAvatar" alt="">
+        <div class="account-info">
+          <span class="account-login" id="userLogin"></span>
+          <span class="account-star" id="starStatus"></span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="logoutBtn">登出</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 云端同步 -->
+  <section class="opt-card">
+    <div class="opt-card-head">
+      <h3>云端同步</h3>
+      <span class="tag tag-amber" id="syncStatusTag">未登录</span>
+    </div>
+    <div class="opt-card-body">
+      <div class="opt-field">
+        <label>后端 API 地址</label>
+        <input type="text" id="apiBase" class="input" placeholder="https://your-worker.workers.dev" autocomplete="off">
+        <button class="btn btn-sm" id="saveApiBase">保存</button>
+      </div>
+      <div class="opt-field-row">
+        <label class="opt-toggle">
+          <input type="checkbox" id="autoSync">
+          <span>自动同步（写入后 30 秒上传，每 10 分钟拉取）</span>
+        </label>
+      </div>
+      <div class="opt-sync-meta">
+        <div class="opt-meta-row"><span>本地记录</span><span id="localCount">—</span></div>
+        <div class="opt-meta-row"><span>云端记录</span><span id="remoteCount">—</span></div>
+        <div class="opt-meta-row"><span>最后同步</span><span id="lastSync">从未</span></div>
+      </div>
+      <div class="opt-actions">
+        <button class="btn" id="syncNowBtn">立即同步</button>
+        <button class="btn btn-ghost" id="syncPullBtn">仅拉取</button>
+        <button class="btn btn-ghost" id="syncPushBtn">仅上传</button>
+        <button class="btn btn-danger-ghost" id="syncResetBtn">重置云端数据</button>
+      </div>
+      <div class="hint" id="syncHint"></div>
+    </div>
+  </section>
+
+  <!-- AI 诊断 -->
+  <section class="opt-card">
+    <div class="opt-card-head"><h3>AI 诊断</h3><span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span></div>
+    <div class="opt-card-body">
+      <div class="opt-field">
+        <label>DeepSeek API Key</label>
+        <input type="password" id="apiKey" class="input" placeholder="sk-...（路径 B 回退用）" autocomplete="off">
+        <button class="btn btn-sm" id="saveKey">保存</button>
+      </div>
+      <div class="opt-field-row">
+        <span class="opt-field-label">默认诊断模式</span>
+        <div class="seg-toggle" id="diagModeToggle">
+          <button class="seg active" data-mode="quick">快速</button>
+          <button class="seg" data-mode="deep">深度</button>
+        </div>
+      </div>
+      <div class="hint">路径 A：后端转发（Star 用户免费，限 10 次/天）。路径 B：自有 Key 直连，不限次数。</div>
+    </div>
+  </section>
+
+  <!-- 预警设置 -->
+  <section class="opt-card">
+    <div class="opt-card-head"><h3>预警设置</h3><span class="hint">达到阈值时显示横幅 + 桌面通知</span></div>
+    <div class="opt-card-body">
+      <div class="opt-field-row">
+        <label class="opt-toggle">
+          <input type="checkbox" id="alertEnabled">
+          <span>启用预警</span>
+        </label>
+      </div>
+      <div class="opt-field">
+        <label>日积分阈值</label>
+        <input type="number" id="dailyCreditLimit" class="input" placeholder="如 50" min="0" step="1">
+      </div>
+      <div class="opt-field">
+        <label>日 Token 阈值</label>
+        <input type="number" id="dailyTokenLimit" class="input" placeholder="如 500000" min="0" step="1000">
+      </div>
+      <div class="opt-field">
+        <label>月积分阈值</label>
+        <input type="number" id="monthlyCreditLimit" class="input" placeholder="如 500" min="0" step="10">
+      </div>
+      <button class="btn btn-primary" id="saveAlert">保存设置</button>
+    </div>
+  </section>
+
+  <!-- 显示 -->
+  <section class="opt-card">
+    <div class="opt-card-head"><h3>显示</h3></div>
+    <div class="opt-card-body">
+      <div class="opt-field-row">
+        <label class="opt-toggle">
+          <input type="checkbox" id="widgetToggle">
+          <span>在 work.trae.cn 页面显示浮窗</span>
+        </label>
+      </div>
+      <div class="opt-field-row">
+        <label class="opt-toggle">
+          <input type="checkbox" id="debugToggle">
+          <span>调试模式（控制台输出拦截日志）</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <!-- 数据管理 -->
+  <section class="opt-card">
+    <div class="opt-card-head"><h3>数据管理</h3></div>
+    <div class="opt-card-body">
+      <div class="opt-export">
+        <div class="opt-field">
+          <label>时间范围</label>
+          <select id="exportRange" class="select">
+            <option value="today">今日</option>
+            <option value="week">本周</option>
+            <option value="month">本月</option>
+            <option value="all" selected>全部</option>
+          </select>
+        </div>
+        <div class="opt-field">
+          <label>模型</label>
+          <select id="exportModel" class="select">
+            <option value="all" selected>全部模型</option>
+          </select>
+        </div>
+        <div class="opt-field">
+          <label>格式</label>
+          <div class="seg-toggle" id="formatToggle">
+            <button class="seg active" data-fmt="csv">CSV</button>
+            <button class="seg" data-fmt="json">JSON</button>
+          </div>
+        </div>
+        <div class="opt-export-preview" id="exportPreview"></div>
+        <button class="btn btn-primary" id="exportDownload">下载文件</button>
+      </div>
+      <div class="opt-divider"></div>
+      <div class="opt-danger">
+        <button class="btn btn-danger-ghost" id="clearBtn">清空本地数据</button>
+        <div class="hint">清空仅影响当前设备，云端数据需通过「重置云端数据」单独操作</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="opt-footer">
+    <button class="btn btn-sm btn-ghost" id="backToPopup" title="关闭设置页返回">完成</button>
+  </footer>
+
+</div>
+<script type="module" src="options.js"></script>
+</body>
+</html>

@@ -202,16 +202,9 @@
         <span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span>
       </div>
 
-      <!-- 后端配置（路径 A） -->
-      <div class="diag-setup" id="apiBaseSetup">
-        <input type="text" id="apiBase" class="input" placeholder="后端 API 地址（如 https://api.example.workers.dev）" autocomplete="off">
-        <button class="btn btn-sm" id="saveApiBase">保存</button>
-      </div>
-
-      <!-- DeepSeek Key（路径 B 回退） -->
-      <div class="diag-setup">
-        <input type="password" id="apiKey" class="input" placeholder="DeepSeek API Key（回退用，sk-...）" autocomplete="off">
-        <button class="btn btn-sm" id="saveKey">保存</button>
+      <div class="diag-setup-hint">
+        <span class="hint">后端地址、API Key 在「设置」中配置</span>
+        <button class="btn btn-sm btn-ghost" id="openOptionsFromDiag">打开设置</button>
       </div>
 
       <div class="diag-actions">
@@ -226,83 +219,18 @@
           </label>
         </div>
         <button class="btn btn-primary" id="diagBtn">诊断我的 Token 用法</button>
-        <span class="hint" id="diagHint"></span>
       </div>
+      <span class="hint" id="diagHint"></span>
 
       <div class="diag-result" id="diagResult"></div>
     </section>
   </div>
 
-  <!-- 导出面板（可折叠） -->
-  <section class="export-panel" id="exportPanel" style="display:none">
-    <div class="export-head">
-      <h3>数据导出</h3>
-      <button class="btn btn-sm btn-ghost" id="exportClose">✕</button>
-    </div>
-    <div class="export-form">
-      <div class="export-field">
-        <label>时间范围</label>
-        <select id="exportRange" class="select">
-          <option value="today">今日</option>
-          <option value="week">本周</option>
-          <option value="month">本月</option>
-          <option value="all" selected>全部</option>
-        </select>
-      </div>
-      <div class="export-field">
-        <label>模型</label>
-        <select id="exportModel" class="select">
-          <option value="all" selected>全部模型</option>
-        </select>
-      </div>
-      <div class="export-field">
-        <label>格式</label>
-        <div class="seg-toggle" id="formatToggle">
-          <button class="seg active" data-fmt="csv">CSV</button>
-          <button class="seg" data-fmt="json">JSON</button>
-        </div>
-      </div>
-    </div>
-    <div class="export-preview" id="exportPreview"></div>
-    <button class="btn btn-primary" id="exportDownload">下载文件</button>
-  </section>
-
-  <!-- 预警设置面板（可折叠） -->
-  <section class="export-panel" id="alertPanel" style="display:none">
-    <div class="export-head">
-      <h3>预警设置</h3>
-      <button class="btn btn-sm btn-ghost" id="alertClose">✕</button>
-    </div>
-    <div class="alert-form">
-      <label class="alert-toggle">
-        <input type="checkbox" id="alertEnabled">
-        <span>启用预警</span>
-      </label>
-      <div class="export-field">
-        <label>日积分阈值</label>
-        <input type="number" id="dailyCreditLimit" class="select" placeholder="如 50" min="0" step="1">
-      </div>
-      <div class="export-field">
-        <label>日 Token 阈值</label>
-        <input type="number" id="dailyTokenLimit" class="select" placeholder="如 500000" min="0" step="1000">
-      </div>
-      <div class="export-field">
-        <label>月积分阈值</label>
-        <input type="number" id="monthlyCreditLimit" class="select" placeholder="如 500" min="0" step="10">
-      </div>
-      <div class="alert-hint">达到阈值时 popup 顶部显示横幅，并触发桌面通知（每小时最多一次）</div>
-      <button class="btn btn-primary" id="saveAlert">保存设置</button>
-    </div>
-  </section>
-
   <!-- 底部 -->
   <footer class="footer">
     <div class="footer-left">
       <button class="btn btn-sm btn-ghost" id="widgetBtn" title="在 work.trae.cn 页面显示/隐藏浮窗">浮窗</button>
-      <button class="btn btn-sm btn-ghost" id="exportBtn">导出</button>
-      <button class="btn btn-sm btn-ghost" id="alertBtn">预警</button>
-      <button class="btn btn-sm btn-ghost" id="clearBtn">清空数据</button>
-      <button class="btn btn-sm btn-ghost" id="debugBtn" title="开启后到 work.trae.cn 控制台查看拦截日志">调试</button>
+      <button class="btn btn-sm btn-ghost" id="optionsBtn" title="打开设置页">设置</button>
     </div>
     <a class="link" href="https://github.com/soulor8908/trae-token-watcher" target="_blank">GitHub</a>
   </footer>

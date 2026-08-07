@@ -1,6 +1,6 @@
 // Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 A 优先，回退 B）
-import { getSummary, getAllRecords, clearAllRecords, exportRecords, getDistinctModels, predictUsage, checkAlert, getComparison } from '../lib/db.js';
-import { loginWithGitHub, logout, refreshAuthStatus, getSession, getApiBase, setApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
+import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison } from '../lib/db.js';
+import { loginWithGitHub, logout, refreshAuthStatus, getSession, getApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
 
 // ---------- 工具函数 ----------
 function fmt(n) {
@@ -386,28 +386,7 @@ function changeBadge(pct) {
   return `<span class="cmp-chg ${cls}">${txt}</span>`;
 }
 
-// ---------- 预警设置面板 ----------
-async function loadAlertConfig() {
-  const { ttw_alert_config: config } = await chrome.storage.local.get('ttw_alert_config');
-  if (config) {
-    document.getElementById('alertEnabled').checked = config.enabled || false;
-    document.getElementById('dailyCreditLimit').value = config.dailyCreditLimit || '';
-    document.getElementById('dailyTokenLimit').value = config.dailyTokenLimit || '';
-    document.getElementById('monthlyCreditLimit').value = config.monthlyCreditLimit || '';
-  }
-}
-
-async function saveAlertConfig() {
-  const config = {
-    enabled: document.getElementById('alertEnabled').checked,
-    dailyCreditLimit: parseFloat(document.getElementById('dailyCreditLimit').value) || 0,
-    dailyTokenLimit: parseInt(document.getElementById('dailyTokenLimit').value, 10) || 0,
-    monthlyCreditLimit: parseFloat(document.getElementById('monthlyCreditLimit').value) || 0,
-  };
-  await chrome.storage.local.set({ ttw_alert_config: config });
-  // 立即检查一次
-  await renderAlert(await checkAlert());
-}
+// ---------- 预警检查（阈值在设置页配置）----------
 function sourceTag(source) {
   // 数据来源标签
   const map = {
@@ -497,36 +476,15 @@ function renderRecords(records) {
 // ---------- AI 诊断（路径 A 优先，回退 B）----------
 const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 const STORAGE_KEY = 'ttw_deepseek_key';
+const DIAG_MODE_KEY = 'ttw_diag_default_mode';
 
-async function loadApiKey() {
-  const result = await chrome.storage.local.get(STORAGE_KEY);
-  if (result[STORAGE_KEY]) {
-    document.getElementById('apiKey').value = result[STORAGE_KEY];
-  }
-}
-
-async function saveApiKey() {
-  const key = document.getElementById('apiKey').value.trim();
-  if (!key) {
-    document.getElementById('diagHint').textContent = '请先输入 Key';
-    return;
-  }
-  await chrome.storage.local.set({ [STORAGE_KEY]: key });
-  document.getElementById('diagHint').textContent = 'Key 已保存';
-  await updateDiagModeTag();
-}
-
-async function loadApiBase() {
-  const base = await getApiBase();
-  if (base) document.getElementById('apiBase').value = base;
-}
-
-async function saveApiBase() {
-  const url = document.getElementById('apiBase').value.trim().replace(/\/$/, '');
-  await setApiBase(url);
-  document.getElementById('diagHint').textContent = url ? '后端地址已保存' : '已清空后端地址';
-  await updateDiagModeTag();
-  await renderAccount();
+// 读取诊断模式默认值（在设置页配置），初始化 radio
+async function loadDiagDefaultMode() {
+  const { [DIAG_MODE_KEY]: mode } = await chrome.storage.local.get(DIAG_MODE_KEY);
+  const m = mode || 'quick';
+  document.querySelectorAll('input[name="diagMode"]').forEach((r) => {
+    r.checked = r.value === m;
+  });
 }
 
 // 更新诊断模式标签
@@ -809,15 +767,14 @@ async function renderAccount() {
 
 // ---------- 事件绑定 ----------
 document.getElementById('refreshBtn').addEventListener('click', renderSummary);
-document.getElementById('saveKey').addEventListener('click', saveApiKey);
-document.getElementById('saveApiBase').addEventListener('click', saveApiBase);
 document.getElementById('diagBtn').addEventListener('click', diagnose);
-document.getElementById('apiKey').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') saveApiKey();
-});
-document.getElementById('apiBase').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') saveApiBase();
-});
+
+// 打开设置页
+function openOptions() {
+  chrome.runtime.openOptionsPage();
+}
+document.getElementById('optionsBtn').addEventListener('click', openOptions);
+document.getElementById('openOptionsFromDiag').addEventListener('click', openOptions);
 
 document.getElementById('loginBtn').addEventListener('click', async () => {
   try {
@@ -831,23 +788,6 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
 document.getElementById('logoutBtn').addEventListener('click', async () => {
   await logout();
   await renderAccount();
-});
-
-document.getElementById('clearBtn').addEventListener('click', async () => {
-  if (confirm('确定清空所有 Token 用量记录？此操作不可恢复。')) {
-    await clearAllRecords();
-    await renderSummary();
-  }
-});
-
-// 调试开关：转发到 work.trae.cn 页面的 inject.js
-let debugOn = false;
-document.getElementById('debugBtn').addEventListener('click', async () => {
-  debugOn = !debugOn;
-  const btn = document.getElementById('debugBtn');
-  btn.textContent = debugOn ? '调试●' : '调试';
-  btn.classList.toggle('on', debugOn);
-  chrome.runtime.sendMessage({ type: 'TTW_DEBUG_TOGGLE', enabled: debugOn });
 });
 
 // 浮窗开关：在 work.trae.cn 页面显示/隐藏浮动小组件
@@ -877,174 +817,7 @@ document.getElementById('widgetBtn').addEventListener('click', async () => {
   updateWidgetBtn();
 });
 
-// ---------- 数据导出 ----------
-let exportFormat = 'csv';
-
-// 打开导出面板
-document.getElementById('exportBtn').addEventListener('click', async () => {
-  const panel = document.getElementById('exportPanel');
-  const visible = panel.style.display !== 'none';
-  panel.style.display = visible ? 'none' : 'block';
-  if (!visible) {
-    await refreshExportModels();
-    await updateExportPreview();
-  }
-});
-
-document.getElementById('exportClose').addEventListener('click', () => {
-  document.getElementById('exportPanel').style.display = 'none';
-});
-
-// 格式切换
-document.getElementById('formatToggle').addEventListener('click', (e) => {
-  const seg = e.target.closest('.seg');
-  if (!seg) return;
-  exportFormat = seg.dataset.fmt;
-  document.querySelectorAll('#formatToggle .seg').forEach((s) => s.classList.toggle('active', s === seg));
-  updateExportPreview();
-});
-
-// 筛选变化时更新预览
-document.getElementById('exportRange').addEventListener('change', updateExportPreview);
-document.getElementById('exportModel').addEventListener('change', updateExportPreview);
-
-// 刷新模型下拉选项
-async function refreshExportModels() {
-  const models = await getDistinctModels();
-  const select = document.getElementById('exportModel');
-  const current = select.value;
-  select.innerHTML = '<option value="all" selected>全部模型</option>' +
-    models.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(shortModel(m))}</option>`).join('');
-  if (models.includes(current)) select.value = current;
-}
-
-// 计算筛选条件
-function getExportFilter() {
-  const range = document.getElementById('exportRange').value;
-  const model = document.getElementById('exportModel').value;
-  const now = Date.now();
-  const dayMs = 86400000;
-  let since = 0;
-  if (range === 'today') {
-    const d = new Date(); d.setHours(0, 0, 0, 0); since = d.getTime();
-  } else if (range === 'week') {
-    since = now - 7 * dayMs;
-  } else if (range === 'month') {
-    since = now - 30 * dayMs;
-  }
-  return { since, until: now, model };
-}
-
-// 更新导出预览
-async function updateExportPreview() {
-  const filter = getExportFilter();
-  const { summary } = await exportRecords(filter);
-  const preview = document.getElementById('exportPreview');
-  preview.innerHTML = `
-    <div class="ep-row"><span>记录数</span><span>${summary.count}</span></div>
-    <div class="ep-row"><span>总 Token</span><span>${fmt(summary.totalTokens)}</span></div>
-    <div class="ep-row"><span>输入 / 输出</span><span>${fmt(summary.inputTokens)} / ${fmt(summary.outputTokens)}</span></div>
-    <div class="ep-row"><span>缓存命中</span><span>${fmt(summary.cachedTokens)}</span></div>
-    <div class="ep-row"><span>积分 / 费用</span><span style="color:#d69e2e">◈${summary.credits.toFixed(2)} / ¥${summary.costMoney.toFixed(3)}</span></div>
-    <div class="ep-row"><span>会话数</span><span>${summary.sessions}</span></div>
-  `;
-}
-
-// 下载文件
-document.getElementById('exportDownload').addEventListener('click', async () => {
-  const filter = getExportFilter();
-  const { records, summary } = await exportRecords(filter);
-
-  if (records.length === 0) {
-    alert('当前筛选条件下无数据可导出');
-    return;
-  }
-
-  let content = '';
-  let filename = '';
-  let mime = '';
-
-  if (exportFormat === 'csv') {
-    content = recordsToCSV(records, summary);
-    filename = `trae-tokens-${new Date().toISOString().slice(0, 10)}.csv`;
-    mime = 'text/csv;charset=utf-8';
-  } else {
-    content = JSON.stringify({ summary, records }, null, 2);
-    filename = `trae-tokens-${new Date().toISOString().slice(0, 10)}.json`;
-    mime = 'application/json;charset=utf-8';
-  }
-
-  // Blob → URL → chrome.downloads
-  const blob = new Blob(['\uFEFF' + content], { type: mime });
-  const url = URL.createObjectURL(blob);
-
-  chrome.downloads.download({
-    url,
-    filename,
-    saveAs: true,
-  }, () => {
-    // 下载完成后释放 URL
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  });
-});
-
-// 记录转 CSV
-function recordsToCSV(records, summary) {
-  const headers = [
-    '时间', '模型', '输入Token', '输出Token', '缓存Token', '缓存写入Token',
-    '总Token', '积分', '费用', '会话ID', '来源', '提问预览', 'URL',
-  ];
-  const lines = [headers.join(',')];
-
-  for (const r of records) {
-    const row = [
-      new Date(r.timestamp).toISOString(),
-      csvEscape(r.model || ''),
-      r.inputTokens || 0,
-      r.outputTokens || 0,
-      r.cachedTokens || 0,
-      r.cacheWriteTokens || 0,
-      r.totalTokens || 0,
-      r.credits != null ? r.credits.toFixed(4) : '',
-      r.costMoney != null ? r.costMoney.toFixed(4) : '',
-      csvEscape(r.conversationId || ''),
-      csvEscape(r.source || ''),
-      csvEscape(r.userInputPreview || ''),
-      csvEscape(r.url || ''),
-    ];
-    lines.push(row.join(','));
-  }
-
-  // 追加汇总行
-  lines.push('');
-  lines.push(`# 汇总,记录数:${summary.count},总Token:${summary.totalTokens},输入:${summary.inputTokens},输出:${summary.outputTokens},缓存:${summary.cachedTokens},积分:${summary.credits.toFixed(2)},费用:${summary.costMoney.toFixed(3)},会话数:${summary.sessions}`);
-  lines.push(`# 导出时间,${summary.exportTime}`);
-
-  return lines.join('\n');
-}
-
-function csvEscape(str) {
-  if (!str) return '';
-  const s = String(str);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
-}
-
-// ---------- 预警设置面板 ----------
-document.getElementById('alertBtn').addEventListener('click', async () => {
-  const panel = document.getElementById('alertPanel');
-  const visible = panel.style.display !== 'none';
-  panel.style.display = visible ? 'none' : 'block';
-  if (!visible) await loadAlertConfig();
-});
-
-document.getElementById('alertClose').addEventListener('click', () => {
-  document.getElementById('alertPanel').style.display = 'none';
-});
-
-document.getElementById('saveAlert').addEventListener('click', saveAlertConfig);
+// ---------- 预警设置已迁移到设置页 ----------
 
 // 监听 storage 变化（OAuth 回调页写入 session 后，popup 若开着能刷新）
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1077,8 +850,7 @@ document.getElementById('modelToggle').addEventListener('click', (e) => {
 
 // ---------- 初始化 ----------
 (async function init() {
-  await loadApiKey();
-  await loadApiBase();
+  await loadDiagDefaultMode();
   await loadWidgetState();
   await renderAccount();
   await renderSummary();

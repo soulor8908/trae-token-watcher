@@ -3,6 +3,7 @@
 
 import { handleAuthStart, handleAuthCallback, handleAuthStatus, handleAuthLogout } from './auth.js';
 import { handleDiagnose } from './diagnose.js';
+import { handleSyncPush, handleSyncPull, handleSyncStatus, handleSyncCursor, handleSyncReset } from './sync.js';
 import { verifySession } from './session.js';
 import { httpError } from './github.js';
 
@@ -43,6 +44,23 @@ export default {
       }
       if (pathname === '/api/diagnose' && method === 'POST') {
         return cors(await handleDiagnose(request, env, session));
+      }
+
+      // ---------- 数据同步路由（需 session）----------
+      if (pathname === '/api/sync/push' && method === 'POST') {
+        return cors(await handleSyncPush(request, env, session));
+      }
+      if (pathname === '/api/sync/pull' && method === 'GET') {
+        return cors(await handleSyncPull(request, env, session));
+      }
+      if (pathname === '/api/sync/status' && method === 'GET') {
+        return cors(await handleSyncStatus(request, env, session));
+      }
+      if (pathname === '/api/sync/cursor' && method === 'POST') {
+        return cors(await handleSyncCursor(request, env, session));
+      }
+      if (pathname === '/api/sync/reset' && method === 'POST') {
+        return cors(await handleSyncReset(request, env, session));
       }
 
       // 404

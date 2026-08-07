@@ -900,6 +900,16 @@ body {
   gap: 6px;
   margin-bottom: 10px;
 }
+.diag-setup-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: var(--bg3);
+  border-radius: 8px;
+}
 .diag-actions {
   display: flex;
   align-items: center;
