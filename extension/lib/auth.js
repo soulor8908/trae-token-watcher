@@ -1,14 +1,34 @@
 // 扩展端 Auth 客户端 — 管理 session、调用后端 API
 // 路径 A（后端）与路径 B（直连 DeepSeek）的统一入口
+//
+// 设计哲学（BYO 默认 + 自托管可选）：
+//   - 普通用户开箱即用，DEFAULT_API_BASE 指向项目方运营的官方 Worker
+//   - 高级用户/企业内网可在设置页切换到自部署模式（填入自己的 Worker URL）
+//   - 复杂性吸收在项目方，对终端用户不可见
 
 const SESSION_KEY = 'ttw_session';
-const API_BASE_KEY = 'ttw_api_base'; // 后端 Worker 域名，用户需配置
-const DEFAULT_API_BASE = ''; // 部署后由用户在设置里填写
+const API_BASE_KEY = 'ttw_api_base'; // 用户自定义后端域名（为空则走官方默认）
 
-// 读取后端 API 基址
+// 项目方运营的官方 Worker — 普通用户零配置
+const DEFAULT_API_BASE = 'https://trae-token-watcher-api.ai-kits.workers.dev';
+
+// 读取后端 API 基址（默认走官方，未配置自定义时返回 DEFAULT_API_BASE）
 export async function getApiBase() {
   const result = await chrome.storage.local.get(API_BASE_KEY);
-  return result[API_BASE_KEY] || DEFAULT_API_BASE;
+  const custom = result[API_BASE_KEY];
+  return custom && custom.trim() ? custom.trim() : DEFAULT_API_BASE;
+}
+
+// 是否走自定义后端（用于 UI 显示当前模式）
+export async function isCustomApiBase() {
+  const result = await chrome.storage.local.get(API_BASE_KEY);
+  const custom = result[API_BASE_KEY];
+  return !!(custom && custom.trim());
+}
+
+// 重置为官方默认
+export async function resetApiBase() {
+  await chrome.storage.local.remove(API_BASE_KEY);
 }
 
 export async function setApiBase(url) {
@@ -34,11 +54,9 @@ export async function clearSession() {
 
 // 发起 GitHub OAuth 登录
 // 打开新标签页到 Worker 的 /auth/github，带上扩展 id
+// 默认走官方 Worker，无需用户预配置
 export async function loginWithGitHub() {
   const apiBase = await getApiBase();
-  if (!apiBase) {
-    throw new Error('请先在设置中配置后端 API 地址');
-  }
   const extId = chrome.runtime.id;
   const url = `${apiBase.replace(/\/$/, '')}/auth/github?ext_id=${encodeURIComponent(extId)}`;
   await chrome.tabs.create({ url });

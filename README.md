@@ -83,9 +83,16 @@ inject.js (主世界拦截) ──postMessage──▶ content.js (隔离世界)
 | 诊断 A | DeepSeek API（后端转发） | Star 用户免费，限 10 次/天，结果缓存 1h |
 | 诊断 B | DeepSeek API（直连） | 用户自带 Key，不限次数，无后端 |
 
-## 后端部署（M2）
+## 后端服务
 
 后端代码在 `worker/` 目录，部署到 Cloudflare Workers。
+
+**普通用户无需关心这一节** — 扩展默认走项目方运营的官方 Worker（`trae-token-watcher-api.ai-kits.workers.dev`），装完扩展点「用 GitHub 登录」即可使用。
+
+仅在以下情况需要自部署：
+- 企业内网/数据合规要求
+- 隐私敏感场景，不希望 session 经过第三方 Worker
+- 想为社区分担官方 Worker 流量
 
 ### 1. 创建 GitHub OAuth App
 
@@ -93,7 +100,7 @@ inject.js (主世界拦截) ──postMessage──▶ content.js (隔离世界)
 - **Authorization callback URL** 填：`https://<你的-worker-域名>/auth/callback`
 - 记下 Client ID 和 Client Secret
 
-> ⚠️ **必须** 在第 3 步用 `npm run secret:github-id` 和 `npm run secret:github-secret` 把它们配置成 Worker Secrets。
+> ⚠️ **自部署必须** 用 `npm run secret:github-id` 和 `npm run secret:github-secret` 把它们配置成 Worker Secrets。
 > 漏配会导致登录时跳转到 `https://github.com/login/oauth/authorize?client_id=undefined` 并返回 404。
 
 ### 2. 创建 Cloudflare 资源
@@ -132,9 +139,9 @@ npm run deploy
 # 记下输出的 Worker 域名，如 https://trae-token-watcher-api.<你>.workers.dev
 ```
 
-### 5. 扩展端配置
+### 5. 扩展端配置（仅自部署用户）
 
-在扩展 popup 的「AI 诊断」区，将后端域名填入「后端 API 地址」并保存。之后点击「用 GitHub 登录」即可完成 OAuth，Star 仓库后享免费诊断。
+默认无需任何配置。若你自部署了 Worker，打开扩展设置页 →「云端同步」→ 展开「高级 · 自部署后端」→ 填入你的 Worker 域名并保存，扩展即切换为自部署模式（顶部状态标签会变成「自部署」）。
 
 ## 双路径诊断
 
@@ -144,13 +151,16 @@ npm run deploy
   └─ 否则 → 路径 B（用户自有 DeepSeek Key 直连，不限次数）
 ```
 
-## 为什么 GitHub 登录要配置后端 API 地址？
+## 为什么 GitHub 登录需要后端服务？
 
-Chrome 扩展（MV3）**无法独立完成 GitHub OAuth**，必须借助后端 Worker 中转，原因有三：
+**答：默认情况下用户不需要做任何配置**——扩展自带项目方运营的官方 Worker 地址，装完点登录即可。
 
-1. **`client_secret` 不能放进扩展** — GitHub 换 token 接口要求带 `client_secret`，扩展代码对所有用户可见，放进去会被盗用冒充。所以换 token 必须在 Worker 服务端完成。
-2. **OAuth 回调地址必须是公网 HTTPS** — GitHub 只接受 `https://...` 形式的 callback URL，不接受 `chrome-extension://...`。所以回调只能落到 Worker 的 `/auth/callback`。
-3. **每个用户自部署** — 本项目是 BYO（Bring Your Own）后端，不同用户的 Worker 域名不同。扩展无法预先知道你的 Worker 在哪，所以必须由你在设置页填一次「后端 API 地址」。
+但 GitHub OAuth 本质上必须有服务端中转，这是 GitHub 协议的硬约束，不是设计选择：
+
+1. **`client_secret` 不能放进扩展** — GitHub 换 token 接口要求带 `client_secret`，扩展代码对所有用户可见，放进去会被盗用冒充。
+2. **OAuth 回调必须是公网 HTTPS** — GitHub 只接受 `https://...` 的 callback URL，不接受 `chrome-extension://...`，所以回调只能落到 Worker 的 `/auth/callback`。
+
+早期版本要求每个用户自部署 Worker，这是糟糕的设计——把项目方该承担的复杂度转嫁给了终端用户。**当前版本已修正**：默认走官方 Worker，复杂性吸收在项目方，对用户不可见。仅在合规/隐私场景才需要在「高级设置」里切换到自部署。
 
 完整流程（[worker/src/auth.js](worker/src/auth.js)）：
 
@@ -171,7 +181,7 @@ Worker → 302 → chrome-extension://${extId}/callback.html#token=...
 登录完成
 ```
 
-所以「后端 API 地址」是扩展发起 OAuth 的入口，没填就找不到 Worker，登录链路从第一步就断掉。
+所以「后端服务」是扩展发起 OAuth 的入口。默认情况下扩展已经知道官方 Worker 在哪，用户什么都不用填；自部署模式下才需要在「高级设置」里切换。
 
 ## 常见问题排查
 
@@ -181,7 +191,8 @@ Worker → 302 → chrome-extension://${extId}/callback.html#token=...
 | 登录后报「Worker 未配置 ...」 | 同上，secret 未生效 | 重新 `wrangler secret put`，并用 `wrangler secret list` 确认 |
 | 已 Star 但诊断报 403 | KV 绑定名错误，Star 缓存写不进 | 检查 `wrangler.toml` 中 KV `binding = "KV"`，重新 `wrangler deploy` |
 | OAuth 回调报 `redirect_uri mismatch` | GitHub OAuth App 的 callback URL 与 Worker 域名不一致 | 去 GitHub OAuth App 设置改为 `https://<worker域名>/auth/callback` |
-| 扩展点登录没反应 | 没配置后端 API 地址 | 在 popup 或设置页填入 Worker 域名并保存 |
+| 扩展点登录没反应（默认模式） | 官方 Worker 临时不可达 | 等待恢复，或在「高级」里临时切到自部署 |
+| 扩展点登录没反应（自部署模式） | 自部署 Worker 未部署或地址填错 | 检查 Worker 状态与填入的 API 地址 |
 
 ## 后续路线
 

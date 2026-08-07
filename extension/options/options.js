@@ -1,7 +1,7 @@
 // Options 页逻辑 — 集中管理所有配置 + 云端同步
 import {
   loginWithGitHub, logout, refreshAuthStatus,
-  getApiBase, setApiBase,
+  getApiBase, setApiBase, isCustomApiBase, resetApiBase,
 } from '../lib/auth.js';
 import {
   clearAllRecords, exportRecords, getDistinctModels,
@@ -77,14 +77,45 @@ async function renderAccount() {
 }
 
 // ---------- 后端 API 地址 ----------
+// 默认走官方 Worker，自部署模式仅在「高级」折叠区配置
 async function loadApiBase() {
-  const base = await getApiBase();
-  document.getElementById('apiBase').value = base || '';
+  const custom = await isCustomApiBase();
+  const input = document.getElementById('apiBase');
+  input.value = custom ? await getApiBase() : '';
+  await updateApiModeTag();
+}
+async function updateApiModeTag() {
+  const custom = await isCustomApiBase();
+  const tag = document.getElementById('apiModeTag');
+  const hint = document.getElementById('apiModeHint');
+  if (custom) {
+    tag.textContent = '自部署';
+    tag.className = 'tag tag-amber';
+    hint.textContent = '走自定义 Worker，已脱离官方服务';
+  } else {
+    tag.textContent = '官方服务';
+    tag.className = 'tag tag-green';
+    hint.textContent = '默认由项目方提供，免配置';
+  }
 }
 async function saveApiBase() {
   const url = document.getElementById('apiBase').value.trim().replace(/\/$/, '');
-  await setApiBase(url);
-  setSyncHint(url ? '后端地址已保存' : '已清空后端地址');
+  if (url) {
+    await setApiBase(url);
+    setSyncHint('已切换为自部署后端：' + url);
+  } else {
+    await resetApiBase();
+    setSyncHint('已清空自定义地址，恢复官方服务');
+  }
+  await updateApiModeTag();
+  await refreshSyncUI();
+  await updateDiagModeTag();
+}
+async function doResetApiBase() {
+  await resetApiBase();
+  document.getElementById('apiBase').value = '';
+  setSyncHint('已恢复官方服务');
+  await updateApiModeTag();
   await refreshSyncUI();
   await updateDiagModeTag();
 }
@@ -335,6 +366,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 
 document.getElementById('saveApiBase').addEventListener('click', saveApiBase);
 document.getElementById('apiBase').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveApiBase(); });
+document.getElementById('resetApiBase').addEventListener('click', doResetApiBase);
 document.getElementById('saveKey').addEventListener('click', saveApiKey);
 document.getElementById('apiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveApiKey(); });
 

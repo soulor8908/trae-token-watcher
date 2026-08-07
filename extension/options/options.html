@@ -43,10 +43,10 @@
       <span class="tag tag-amber" id="syncStatusTag">未登录</span>
     </div>
     <div class="opt-card-body">
-      <div class="opt-field">
-        <label>后端 API 地址</label>
-        <input type="text" id="apiBase" class="input" placeholder="https://your-worker.workers.dev" autocomplete="off">
-        <button class="btn btn-sm" id="saveApiBase">保存</button>
+      <div class="opt-api-mode">
+        <span class="opt-api-mode-label">后端服务</span>
+        <span class="tag tag-green" id="apiModeTag">官方服务</span>
+        <span class="hint" id="apiModeHint">默认由项目方提供，免配置</span>
       </div>
       <div class="opt-field-row">
         <label class="opt-toggle">
@@ -66,6 +66,16 @@
         <button class="btn btn-danger-ghost" id="syncResetBtn">重置云端数据</button>
       </div>
       <div class="hint" id="syncHint"></div>
+      <details class="opt-advanced">
+        <summary>高级 · 自部署后端</summary>
+        <div class="opt-field">
+          <label>自定义后端 API 地址</label>
+          <input type="text" id="apiBase" class="input" placeholder="https://your-worker.workers.dev" autocomplete="off">
+          <button class="btn btn-sm" id="saveApiBase">保存</button>
+          <button class="btn btn-sm btn-ghost" id="resetApiBase">重置为官方</button>
+        </div>
+        <div class="hint">仅在企业内网/隐私敏感场景使用：自部署 Cloudflare Worker，<a href="https://github.com/soulor8908/trae-token-watcher/tree/main/worker" target="_blank">部署文档</a></div>
+      </details>
     </div>
   </section>
 

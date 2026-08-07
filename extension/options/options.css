@@ -186,6 +186,64 @@ body {
 }
 .select:focus { outline: none; border-color: var(--accent); }
 
+/* API mode indicator + advanced section */
+.opt-api-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+}
+.opt-api-mode-label {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.opt-api-mode .hint {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.opt-advanced {
+  border: 1px dashed var(--rule2);
+  border-radius: 8px;
+  padding: 0;
+  margin-top: 4px;
+  background: transparent;
+}
+.opt-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted2);
+  font-family: var(--font-mono);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.opt-advanced > summary::-webkit-details-marker { display: none; }
+.opt-advanced > summary::before {
+  content: '▸';
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.opt-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+.opt-advanced > summary:hover { color: var(--ink); }
+.opt-advanced[open] {
+  padding-bottom: 14px;
+}
+.opt-advanced[open] > .opt-field,
+.opt-advanced[open] > .hint {
+  padding: 0 14px;
+  margin-top: 8px;
+}
+
 /* Sync meta */
 .opt-sync-meta {
   background: var(--bg3);
