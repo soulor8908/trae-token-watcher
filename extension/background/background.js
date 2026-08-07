@@ -1,6 +1,10 @@
-// Background Service Worker — 数据写入中枢 + 消息路由
+// Background Service Worker — 数据写入中枢 + 消息路由 + 预警检查
 // 失败优雅：所有写入均 try/catch，不影响页面正常运行
-import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince } from '../lib/db.js';
+import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, checkAlert } from '../lib/db.js';
+
+const ALERT_ALARM = 'ttw-alert-check';
+const ALERT_NOTIF_ID = 'ttw-alert';
+const ALERT_COOLDOWN_MS = 3600000; // 每小时最多一次通知
 
 // 消息路由表
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -29,6 +33,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .then((records) => sendResponse({ records }))
         .catch((e) => sendResponse({ error: String(e) }));
       return true;
+    case 'TTW_WIDGET_INIT':
+      getWidgetSummary()
+        .then((summary) => sendResponse({ summary }))
+        .catch((e) => sendResponse({ error: String(e) }));
+      return true;
+    case 'TTW_DEBUG_TOGGLE':
+      // 转发调试开关到所有 trae.cn 标签页的 content script
+      chrome.tabs.query({ url: ['https://*.trae.cn/*'] }, (tabs) => {
+        for (const tab of tabs) {
+          chrome.tabs.sendMessage(tab.id, { type: 'TTW_DEBUG_TOGGLE', enabled: msg.enabled }).catch(() => {});
+        }
+      });
+      return false;
   }
 });
 
@@ -46,22 +63,62 @@ async function handleUsage(payload, sender) {
       url: payload.url || '',
       source: payload.source || 'fetch',
       tabId: sender.tab?.id || null,
+      ...(payload.remaining != null ? { remaining: payload.remaining } : {}),
+      ...(payload.cacheWriteTokens != null ? { cacheWriteTokens: payload.cacheWriteTokens } : {}),
+      ...(payload.credits != null ? { credits: payload.credits } : {}),
+      ...(payload.costMoney != null ? { costMoney: payload.costMoney } : {}),
+      ...(payload.amount != null ? { amount: payload.amount } : {}),
+      ...(payload.userInputPreview != null ? { userInputPreview: payload.userInputPreview } : {}),
     });
     refreshBadge();
+    console.log('[trae-token-watcher] 记录:', payload.source, payload.totalTokens, 'tokens |', payload.model, '|', payload.url);
   } catch (e) {
     console.warn('[trae-token-watcher] 写入失败', e);
   }
 }
 
-// 更新扩展图标 badge：显示今日请求数
+// 更新扩展图标 badge：显示今日请求数，预警时变红
 async function refreshBadge() {
   try {
     const records = await getRecordsSince(startOfDay(Date.now()));
     const count = records.length;
     const text = count > 0 ? String(count > 999 ? '999+' : count) : '';
     chrome.action.setBadgeText({ text });
-    chrome.action.setBadgeBackgroundColor({ color: '#27d98b' });
+
+    // 检查预警状态决定 badge 颜色
+    const alert = await checkAlert();
+    if (alert.triggered && alert.triggers.some((t) => t.level === 'danger')) {
+      chrome.action.setBadgeBackgroundColor({ color: '#e53e3e' }); // 红色危险
+    } else if (alert.triggered) {
+      chrome.action.setBadgeBackgroundColor({ color: '#dd6b20' }); // 橙色警告
+    } else {
+      chrome.action.setBadgeBackgroundColor({ color: '#27d98b' }); // 绿色正常
+    }
   } catch (_) {}
+}
+
+// 浮窗摘要：今日累计统计 + 最近一条记录
+async function getWidgetSummary() {
+  const records = await getRecordsSince(startOfDay(Date.now()));
+  let total = 0, input = 0, output = 0, cached = 0, credits = 0;
+  let lastModel = '', lastTokens = 0;
+
+  for (const r of records) {
+    total += r.totalTokens || 0;
+    input += r.inputTokens || 0;
+    output += r.outputTokens || 0;
+    cached += r.cachedTokens || 0;
+    credits += r.credits || 0;
+  }
+
+  // records 按时间戳升序，最后一条是最新的
+  if (records.length > 0) {
+    const last = records[records.length - 1];
+    lastModel = last.model || '';
+    lastTokens = last.totalTokens || 0;
+  }
+
+  return { total, input, output, cached, credits, count: records.length, lastModel, lastTokens };
 }
 
 function startOfDay(ts) {
@@ -70,7 +127,56 @@ function startOfDay(ts) {
   return d.getTime();
 }
 
-// 扩展安装时初始化
+// ---------- 定时预警检查 ----------
+async function runAlertCheck() {
+  try {
+    const alert = await checkAlert();
+    if (!alert.triggered) return;
+
+    // 冷却检查：距上次通知 > 1 小时
+    const { ttw_last_alert_ts: lastTs } = await chrome.storage.local.get('ttw_last_alert_ts');
+    if (lastTs && Date.now() - lastTs < ALERT_COOLDOWN_MS) return;
+
+    // 发送桌面通知
+    const messages = alert.triggers.map((t) => t.message);
+    const hasDanger = alert.triggers.some((t) => t.level === 'danger');
+    chrome.notifications.create(ALERT_NOTIF_ID, {
+      type: 'basic',
+      iconUrl: 'icons/icon-128.png',
+      title: hasDanger ? '⚠ TRAE Token 预警' : 'TRAE Token 提醒',
+      message: messages.join('\n'),
+      priority: 2,
+    });
+
+    await chrome.storage.local.set({ ttw_last_alert_ts: Date.now() });
+    console.log('[trae-token-watcher] 预警通知已发送:', messages.join('; '));
+  } catch (e) {
+    console.warn('[trae-token-watcher] 预警检查失败', e);
+  }
+}
+
+// 通知点击：打开 popup
+chrome.notifications.onClicked.addListener(() => {
+  chrome.action.openPopup?.();
+  chrome.notifications.clear(ALERT_NOTIF_ID);
+});
+
+// 扩展安装时初始化 + 启动定时预警
 chrome.runtime.onInstalled.addListener(() => {
   refreshBadge();
+  // 每 15 分钟检查一次预警（alarm 最小间隔 1 分钟）
+  chrome.alarms.create(ALERT_ALARM, { periodInMinutes: 15 });
 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALERT_ALARM) {
+    runAlertCheck();
+  }
+});
+
+// 每次写入数据后也触发预警检查（带冷却保护，不会重复发通知）
+const _origHandleUsage = handleUsage;
+handleUsage = async function (payload, sender) {
+  await _origHandleUsage(payload, sender);
+  runAlertCheck();
+};

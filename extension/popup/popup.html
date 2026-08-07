@@ -42,80 +42,268 @@
       <div class="stat-val" id="todayTotal" data-val="0">0</div>
       <div class="stat-lbl">今日 Token</div>
       <div class="stat-sub" id="todayCount">0 次请求</div>
+      <div class="stat-sub" id="todayCredits" style="color:#d69e2e">◈ 0 积分</div>
     </div>
     <div class="stat-card">
       <div class="stat-val accent-blue" id="weekTotal" data-val="0">0</div>
       <div class="stat-lbl">本周 Token</div>
       <div class="stat-sub" id="weekCount">0 次请求</div>
+      <div class="stat-sub" id="weekCredits" style="color:#d69e2e">◈ 0 积分</div>
     </div>
     <div class="stat-card">
       <div class="stat-val accent-amber" id="monthTotal" data-val="0">0</div>
       <div class="stat-lbl">本月 Token</div>
       <div class="stat-sub" id="monthCount">0 次请求</div>
+      <div class="stat-sub" id="monthCredits" style="color:#d69e2e">◈ 0 积分</div>
     </div>
   </section>
 
-  <!-- 趋势图 -->
-  <section class="section">
-    <div class="section-head">
-      <h3>14 天趋势</h3>
-      <div class="legend">
-        <span class="legend-item"><i class="dot-green"></i>输入</span>
-        <span class="legend-item"><i class="dot-blue"></i>输出</span>
+  <!-- Tab 导航 -->
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="models">模型</button>
+    <button class="tab" data-tab="sessions">会话</button>
+    <button class="tab" data-tab="diag">诊断</button>
+  </nav>
+
+  <!-- Tab: 概览 -->
+  <div class="tab-panel active" id="tab-overview">
+    <!-- 用量预测卡片 -->
+    <section class="section predict-section">
+      <div class="section-head">
+        <h3>用量预测</h3>
+        <span class="trend-badge" id="trendBadge">—</span>
+      </div>
+      <div class="predict-grid">
+        <div class="predict-card">
+          <div class="predict-lbl">今日已用</div>
+          <div class="predict-val" id="todayUsed">0 积分</div>
+          <div class="predict-sub" id="todayUsedTok">0 tokens</div>
+        </div>
+        <div class="predict-card">
+          <div class="predict-lbl">预计 7 天</div>
+          <div class="predict-val accent-blue" id="predict7d">0 积分</div>
+          <div class="predict-sub" id="predict7dTok">0 tokens</div>
+        </div>
+        <div class="predict-card">
+          <div class="predict-lbl">预计 30 天</div>
+          <div class="predict-val accent-amber" id="predict30d">0 积分</div>
+          <div class="predict-sub" id="predict30dTok">0 tokens</div>
+        </div>
+      </div>
+      <div class="predict-detail" id="predictDetail"></div>
+    </section>
+
+    <!-- 周期对比 -->
+    <section class="section compare-section">
+      <div class="section-head">
+        <h3>周期对比</h3>
+        <span class="hint" id="compareHint"></span>
+      </div>
+      <div class="compare-grid" id="compareGrid">
+        <div class="empty">暂无对比数据</div>
+      </div>
+    </section>
+
+    <!-- 预警横幅（触发时显示） -->
+    <div class="alert-banner" id="alertBanner" style="display:none">
+      <span class="alert-icon">⚠</span>
+      <span class="alert-text" id="alertText"></span>
+    </div>
+
+    <!-- 缓存命中率卡片 -->
+    <section class="section cache-section">
+      <div class="section-head">
+        <h3>缓存命中率</h3>
+        <span class="hint" id="cacheHint"></span>
+      </div>
+      <div class="cache-grid">
+        <div class="cache-ring" id="cacheRing">
+          <svg viewBox="0 0 80 80" class="ring-svg">
+            <circle cx="40" cy="40" r="32" class="ring-bg"/>
+            <circle cx="40" cy="40" r="32" class="ring-fg" id="ringFg"/>
+          </svg>
+          <div class="ring-val" id="cacheRate">0%</div>
+        </div>
+        <div class="cache-meta">
+          <div class="cache-row"><span>今日命中</span><span id="cacheToday">0%</span></div>
+          <div class="cache-row"><span>缓存 token</span><span id="cacheTotalTok">0</span></div>
+          <div class="cache-row"><span>估算节省</span><span id="cacheSaved" style="color:#d69e2e">◈ 0</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 趋势图 -->
+    <section class="section">
+      <div class="section-head">
+        <h3>14 天趋势</h3>
+        <div class="legend">
+          <span class="legend-item"><i class="dot-green"></i>输入</span>
+          <span class="legend-item"><i class="dot-blue"></i>输出</span>
+        </div>
+      </div>
+      <div class="chart" id="chart">
+        <div class="chart-empty">暂无趋势数据</div>
+      </div>
+    </section>
+
+    <!-- 最近记录 -->
+    <section class="section">
+      <div class="section-head">
+        <h3>最近记录</h3>
+        <button class="btn btn-sm btn-ghost" id="refreshBtn">刷新</button>
+      </div>
+      <div class="records" id="records">
+        <div class="empty">暂无记录，打开 work.trae.cn 开始对话即可采集</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Tab: 模型 -->
+  <div class="tab-panel" id="tab-models">
+    <section class="section">
+      <div class="section-head">
+        <h3>模型成本对比</h3>
+        <div class="seg-toggle" id="modelToggle">
+          <button class="seg active" data-metric="tokens">Token</button>
+          <button class="seg" data-metric="cost">成本</button>
+        </div>
+      </div>
+      <div class="model-compare" id="modelCompare">
+        <div class="empty">暂无模型数据</div>
+      </div>
+    </section>
+    <section class="section">
+      <h3>按模型缓存率</h3>
+      <div class="cache-by-model" id="cacheByModel">
+        <div class="empty">暂无数据</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Tab: 会话 -->
+  <div class="tab-panel" id="tab-sessions">
+    <section class="section">
+      <div class="section-head">
+        <h3>会话级明细</h3>
+        <span class="hint" id="sessionHint"></span>
+      </div>
+      <div class="session-list" id="sessionList">
+        <div class="empty">暂无会话数据</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Tab: 诊断 -->
+  <div class="tab-panel" id="tab-diag">
+    <section class="section">
+      <div class="section-head">
+        <h3>AI 诊断</h3>
+        <span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span>
+      </div>
+
+      <!-- 后端配置（路径 A） -->
+      <div class="diag-setup" id="apiBaseSetup">
+        <input type="text" id="apiBase" class="input" placeholder="后端 API 地址（如 https://api.example.workers.dev）" autocomplete="off">
+        <button class="btn btn-sm" id="saveApiBase">保存</button>
+      </div>
+
+      <!-- DeepSeek Key（路径 B 回退） -->
+      <div class="diag-setup">
+        <input type="password" id="apiKey" class="input" placeholder="DeepSeek API Key（回退用，sk-...）" autocomplete="off">
+        <button class="btn btn-sm" id="saveKey">保存</button>
+      </div>
+
+      <div class="diag-actions">
+        <div class="diag-mode-toggle">
+          <label class="diag-mode-opt">
+            <input type="radio" name="diagMode" value="quick" checked>
+            <span>快速诊断</span>
+          </label>
+          <label class="diag-mode-opt">
+            <input type="radio" name="diagMode" value="deep">
+            <span>深度分析</span>
+          </label>
+        </div>
+        <button class="btn btn-primary" id="diagBtn">诊断我的 Token 用法</button>
+        <span class="hint" id="diagHint"></span>
+      </div>
+
+      <div class="diag-result" id="diagResult"></div>
+    </section>
+  </div>
+
+  <!-- 导出面板（可折叠） -->
+  <section class="export-panel" id="exportPanel" style="display:none">
+    <div class="export-head">
+      <h3>数据导出</h3>
+      <button class="btn btn-sm btn-ghost" id="exportClose">✕</button>
+    </div>
+    <div class="export-form">
+      <div class="export-field">
+        <label>时间范围</label>
+        <select id="exportRange" class="select">
+          <option value="today">今日</option>
+          <option value="week">本周</option>
+          <option value="month">本月</option>
+          <option value="all" selected>全部</option>
+        </select>
+      </div>
+      <div class="export-field">
+        <label>模型</label>
+        <select id="exportModel" class="select">
+          <option value="all" selected>全部模型</option>
+        </select>
+      </div>
+      <div class="export-field">
+        <label>格式</label>
+        <div class="seg-toggle" id="formatToggle">
+          <button class="seg active" data-fmt="csv">CSV</button>
+          <button class="seg" data-fmt="json">JSON</button>
+        </div>
       </div>
     </div>
-    <div class="chart" id="chart">
-      <div class="chart-empty">暂无趋势数据</div>
-    </div>
+    <div class="export-preview" id="exportPreview"></div>
+    <button class="btn btn-primary" id="exportDownload">下载文件</button>
   </section>
 
-  <!-- 模型分布 -->
-  <section class="section" id="modelSection" style="display:none">
-    <h3>模型分布</h3>
-    <div class="model-list" id="modelList"></div>
-  </section>
-
-  <!-- AI 诊断 -->
-  <section class="section">
-    <div class="section-head">
-      <h3>AI 诊断</h3>
-      <span class="tag tag-amber" id="diagMode">路径 B · 自带 Key</span>
+  <!-- 预警设置面板（可折叠） -->
+  <section class="export-panel" id="alertPanel" style="display:none">
+    <div class="export-head">
+      <h3>预警设置</h3>
+      <button class="btn btn-sm btn-ghost" id="alertClose">✕</button>
     </div>
-
-    <!-- 后端配置（路径 A） -->
-    <div class="diag-setup" id="apiBaseSetup">
-      <input type="text" id="apiBase" class="input" placeholder="后端 API 地址（如 https://api.example.workers.dev）" autocomplete="off">
-      <button class="btn btn-sm" id="saveApiBase">保存</button>
-    </div>
-
-    <!-- DeepSeek Key（路径 B 回退） -->
-    <div class="diag-setup">
-      <input type="password" id="apiKey" class="input" placeholder="DeepSeek API Key（回退用，sk-...）" autocomplete="off">
-      <button class="btn btn-sm" id="saveKey">保存</button>
-    </div>
-
-    <div class="diag-actions">
-      <button class="btn btn-primary" id="diagBtn">诊断我的 Token 用法</button>
-      <span class="hint" id="diagHint"></span>
-    </div>
-
-    <div class="diag-result" id="diagResult"></div>
-  </section>
-
-  <!-- 最近记录 -->
-  <section class="section">
-    <div class="section-head">
-      <h3>最近记录</h3>
-      <button class="btn btn-sm btn-ghost" id="refreshBtn">刷新</button>
-    </div>
-    <div class="records" id="records">
-      <div class="empty">暂无记录，打开 work.trae.cn 开始对话即可采集</div>
+    <div class="alert-form">
+      <label class="alert-toggle">
+        <input type="checkbox" id="alertEnabled">
+        <span>启用预警</span>
+      </label>
+      <div class="export-field">
+        <label>日积分阈值</label>
+        <input type="number" id="dailyCreditLimit" class="select" placeholder="如 50" min="0" step="1">
+      </div>
+      <div class="export-field">
+        <label>日 Token 阈值</label>
+        <input type="number" id="dailyTokenLimit" class="select" placeholder="如 500000" min="0" step="1000">
+      </div>
+      <div class="export-field">
+        <label>月积分阈值</label>
+        <input type="number" id="monthlyCreditLimit" class="select" placeholder="如 500" min="0" step="10">
+      </div>
+      <div class="alert-hint">达到阈值时 popup 顶部显示横幅，并触发桌面通知（每小时最多一次）</div>
+      <button class="btn btn-primary" id="saveAlert">保存设置</button>
     </div>
   </section>
 
   <!-- 底部 -->
   <footer class="footer">
-    <button class="btn btn-sm btn-ghost" id="clearBtn">清空数据</button>
+    <div class="footer-left">
+      <button class="btn btn-sm btn-ghost" id="widgetBtn" title="在 work.trae.cn 页面显示/隐藏浮窗">浮窗</button>
+      <button class="btn btn-sm btn-ghost" id="exportBtn">导出</button>
+      <button class="btn btn-sm btn-ghost" id="alertBtn">预警</button>
+      <button class="btn btn-sm btn-ghost" id="clearBtn">清空数据</button>
+      <button class="btn btn-sm btn-ghost" id="debugBtn" title="开启后到 work.trae.cn 控制台查看拦截日志">调试</button>
+    </div>
     <a class="link" href="https://github.com/soulor8908/trae-token-watcher" target="_blank">GitHub</a>
   </footer>
 

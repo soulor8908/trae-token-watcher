@@ -94,10 +94,10 @@ export async function getSummary() {
   const dayMs = 24 * 60 * 60 * 1000;
 
   const buckets = {
-    today: { since: startOfDay(now), input: 0, output: 0, cached: 0, total: 0, count: 0 },
-    week: { since: now - 7 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0 },
-    month: { since: now - 30 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0 },
-    all: { since: 0, input: 0, output: 0, cached: 0, total: 0, count: 0 },
+    today: { since: startOfDay(now), input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
+    week: { since: now - 7 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
+    month: { since: now - 30 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
+    all: { since: 0, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
   };
 
   // 按天聚合的趋势数据（最近 14 天）
@@ -111,6 +111,8 @@ export async function getSummary() {
         buckets[key].cached += r.cachedTokens || 0;
         buckets[key].total += r.totalTokens || 0;
         buckets[key].count += 1;
+        buckets[key].credits += r.credits || 0;
+        buckets[key].costMoney += r.costMoney || 0;
       }
     }
     // 趋势按天
@@ -129,21 +131,343 @@ export async function getSummary() {
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(-14);
 
-  // 按 model 汇总
+  // 按 model 汇总（增强：含 input/output/cached/credits/costMoney）
   const byModel = {};
   for (const r of records) {
     const m = r.model || 'unknown';
-    if (!byModel[m]) byModel[m] = { model: m, total: 0, count: 0 };
+    if (!byModel[m]) byModel[m] = {
+      model: m, total: 0, count: 0, input: 0, output: 0, cached: 0,
+      credits: 0, costMoney: 0, cacheWrite: 0,
+    };
     byModel[m].total += r.totalTokens || 0;
+    byModel[m].input += r.inputTokens || 0;
+    byModel[m].output += r.outputTokens || 0;
+    byModel[m].cached += r.cachedTokens || 0;
+    byModel[m].cacheWrite += r.cacheWriteTokens || 0;
+    byModel[m].credits += r.credits || 0;
+    byModel[m].costMoney += r.costMoney || 0;
     byModel[m].count += 1;
   }
+  const byModelArr = Object.values(byModel).sort((a, b) => b.total - a.total);
+
+  // 按 session 聚合（会话级明细）
+  const bySession = {};
+  for (const r of records) {
+    const sid = r.conversationId || '_unknown';
+    if (!bySession[sid]) bySession[sid] = {
+      sessionId: sid,
+      title: r.userInputPreview || (sid === '_unknown' ? '未知会话' : sid.slice(0, 16)),
+      total: 0, count: 0, input: 0, output: 0, cached: 0,
+      credits: 0, costMoney: 0, model: r.model || null,
+      firstActive: r.timestamp, lastActive: r.timestamp,
+    };
+    const s = bySession[sid];
+    s.total += r.totalTokens || 0;
+    s.input += r.inputTokens || 0;
+    s.output += r.outputTokens || 0;
+    s.cached += r.cachedTokens || 0;
+    s.credits += r.credits || 0;
+    s.costMoney += r.costMoney || 0;
+    s.count += 1;
+    if (r.timestamp < s.firstActive) s.firstActive = r.timestamp;
+    if (r.timestamp > s.lastActive) s.lastActive = r.timestamp;
+    // 标题优先用第一条用户提问
+    if (r.userInputPreview && (s.title === sid.slice(0, 16) || !s.title)) {
+      s.title = r.userInputPreview;
+    }
+  }
+  const bySessionArr = Object.values(bySession).sort((a, b) => b.lastActive - a.lastActive);
+
+  // 缓存命中率统计
+  // 命中率 = cachedTokens / (inputTokens + cachedTokens)
+  // （缓存命中的 token 本应计入 input，命中率反映 prompt 中有多少比例命中缓存）
+  const cacheStats = {
+    overall: computeCacheRate(buckets.all.input, buckets.all.cached),
+    today: computeCacheRate(buckets.today.input, buckets.today.cached),
+    byModel: byModelArr.map((m) => ({
+      model: m.model,
+      rate: computeCacheRate(m.input, m.cached),
+      cached: m.cached,
+      input: m.input,
+    })).filter((m) => m.cached > 0 || m.input > 0),
+  };
 
   return {
     buckets,
     trend: trendArr,
-    byModel: Object.values(byModel).sort((a, b) => b.total - a.total),
+    byModel: byModelArr,
+    bySession: bySessionArr,
+    cacheStats,
     totalRecords: records.length,
   };
+}
+
+function computeCacheRate(input, cached) {
+  const denom = (input || 0) + (cached || 0);
+  if (denom === 0) return 0;
+  return (cached || 0) / denom;
+}
+
+// 导出记录：按时间范围 + 模型筛选
+// options: { since?: number, until?: number, model?: string }
+// 返回 { records, summary } — records 为筛选后记录数组，summary 为汇总
+export async function exportRecords(options = {}) {
+  const { since = 0, until = Date.now(), model = null } = options;
+  const all = await getRecordsSince(since);
+  let records = all.filter((r) => r.timestamp <= until);
+  if (model && model !== 'all') {
+    records = records.filter((r) => (r.model || 'unknown') === model);
+  }
+
+  // 汇总
+  const summary = {
+    exportTime: new Date().toISOString(),
+    filter: { since, until, model },
+    count: records.length,
+    totalTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    cacheWriteTokens: 0,
+    credits: 0,
+    costMoney: 0,
+    models: {},
+    sessions: new Set(),
+  };
+
+  for (const r of records) {
+    summary.totalTokens += r.totalTokens || 0;
+    summary.inputTokens += r.inputTokens || 0;
+    summary.outputTokens += r.outputTokens || 0;
+    summary.cachedTokens += r.cachedTokens || 0;
+    summary.cacheWriteTokens += r.cacheWriteTokens || 0;
+    summary.credits += r.credits || 0;
+    summary.costMoney += r.costMoney || 0;
+    const m = r.model || 'unknown';
+    if (!summary.models[m]) summary.models[m] = { count: 0, total: 0, credits: 0 };
+    summary.models[m].count++;
+    summary.models[m].total += r.totalTokens || 0;
+    summary.models[m].credits += r.credits || 0;
+    if (r.conversationId) summary.sessions.add(r.conversationId);
+  }
+  summary.sessions = summary.sessions.size;
+
+  return { records, summary };
+}
+
+// 获取所有不同的模型名（用于导出筛选下拉框）
+export async function getDistinctModels() {
+  const all = await getRecordsSince(0);
+  const models = new Set();
+  for (const r of all) {
+    models.add(r.model || 'unknown');
+  }
+  return [...models].sort();
+}
+
+// 用量预测：基于历史趋势预测未来 7/30 天消耗
+// 算法：加权移动平均（最近 7 天权重递减），结合趋势修正
+export async function predictUsage() {
+  const now = Date.now();
+  const dayMs = 86400000;
+  const records = await getRecordsSince(now - 14 * dayMs); // 取近 14 天
+
+  if (records.length === 0) {
+    return { available: false, reason: '暂无历史数据' };
+  }
+
+  // 按天聚合（最近 14 天）
+  const dailyMap = new Map();
+  for (const r of records) {
+    const d = new Date(r.timestamp);
+    d.setHours(0, 0, 0, 0);
+    const key = d.toISOString().slice(0, 10);
+    if (!dailyMap.has(key)) {
+      dailyMap.set(key, { date: key, tokens: 0, credits: 0, count: 0 });
+    }
+    const day = dailyMap.get(key);
+    day.tokens += r.totalTokens || 0;
+    day.credits += r.credits || 0;
+    day.count += 1;
+  }
+
+  const days = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  if (days.length === 0) {
+    return { available: false, reason: '近 14 天无数据' };
+  }
+
+  // 加权移动平均：最近的天权重最高
+  // 权重：第 1 天（最早）权重 1，第 N 天（最近）权重 N
+  let totalWeight = 0;
+  let weightedTokens = 0;
+  let weightedCredits = 0;
+  let weightedCount = 0;
+  const n = days.length;
+  for (let i = 0; i < n; i++) {
+    const w = i + 1; // 权重递增
+    totalWeight += w;
+    weightedTokens += days[i].tokens * w;
+    weightedCredits += days[i].credits * w;
+    weightedCount += days[i].count * w;
+  }
+  const avgDailyTokens = weightedTokens / totalWeight;
+  const avgDailyCredits = weightedCredits / totalWeight;
+  const avgDailyCount = weightedCount / totalWeight;
+
+  // 趋势修正：对比最近 3 天 vs 之前的天
+  let trendMultiplier = 1.0;
+  if (n >= 4) {
+    const recent3 = days.slice(-3);
+    const earlier = days.slice(0, -3);
+    const recentAvg = recent3.reduce((s, d) => s + d.tokens, 0) / recent3.length;
+    const earlierAvg = earlier.reduce((s, d) => s + d.tokens, 0) / earlier.length;
+    if (earlierAvg > 0) {
+      trendMultiplier = recentAvg / earlierAvg;
+      // 限制趋势倍率在 0.5-2.0 之间避免极端值
+      trendMultiplier = Math.max(0.5, Math.min(2.0, trendMultiplier));
+    }
+  }
+
+  // 预测
+  const predictedDailyTokens = avgDailyTokens * trendMultiplier;
+  const predictedDailyCredits = avgDailyCredits * trendMultiplier;
+  const predicted7dTokens = predictedDailyTokens * 7;
+  const predicted30dTokens = predictedDailyTokens * 30;
+  const predicted7dCredits = predictedDailyCredits * 7;
+  const predicted30dCredits = predictedDailyCredits * 30;
+
+  // 今日已用
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayData = days.find((d) => d.date === todayKey) || { tokens: 0, credits: 0, count: 0 };
+
+  return {
+    available: true,
+    avgDailyTokens: Math.round(avgDailyTokens),
+    avgDailyCredits: parseFloat(avgDailyCredits.toFixed(2)),
+    avgDailyCount: Math.round(avgDailyCount),
+    trendMultiplier: parseFloat(trendMultiplier.toFixed(2)),
+    trendDirection: trendMultiplier > 1.1 ? 'up' : (trendMultiplier < 0.9 ? 'down' : 'stable'),
+    predictedDailyTokens: Math.round(predictedDailyTokens),
+    predictedDailyCredits: parseFloat(predictedDailyCredits.toFixed(2)),
+    predicted7d: {
+      tokens: Math.round(predicted7dTokens),
+      credits: parseFloat(predicted7dCredits.toFixed(2)),
+    },
+    predicted30d: {
+      tokens: Math.round(predicted30dTokens),
+      credits: parseFloat(predicted30dCredits.toFixed(2)),
+    },
+    todayUsed: {
+      tokens: todayData.tokens,
+      credits: parseFloat(todayData.credits.toFixed(2)),
+      count: todayData.count,
+    },
+    historyDays: n,
+  };
+}
+
+// 预警检查：对比今日用量与阈值
+export async function checkAlert() {
+  const prediction = await predictUsage();
+  if (!prediction.available) return { triggered: false, reason: prediction.reason };
+
+  // 读取阈值设置
+  const { ttw_alert_config: config } = await chrome.storage.local.get('ttw_alert_config');
+  if (!config || !config.enabled) return { triggered: false, reason: '未启用预警' };
+
+  const todayCredits = prediction.todayUsed.credits;
+  const todayTokens = prediction.todayUsed.tokens;
+  const triggers = [];
+
+  // 今日积分阈值
+  if (config.dailyCreditLimit && todayCredits >= config.dailyCreditLimit) {
+    triggers.push({
+      type: 'daily_credits',
+      level: 'warning',
+      message: `今日已消耗 ${todayCredits.toFixed(2)} 积分（阈值 ${config.dailyCreditLimit}）`,
+    });
+  }
+
+  // 今日 token 阈值
+  if (config.dailyTokenLimit && todayTokens >= config.dailyTokenLimit) {
+    triggers.push({
+      type: 'daily_tokens',
+      level: 'warning',
+      message: `今日已消耗 ${Math.round(todayTokens)} tokens（阈值 ${config.dailyTokenLimit}）`,
+    });
+  }
+
+  // 月度预测阈值
+  if (config.monthlyCreditLimit && prediction.predicted30d.credits >= config.monthlyCreditLimit) {
+    triggers.push({
+      type: 'monthly_predict',
+      level: 'danger',
+      message: `预测本月消耗 ${prediction.predicted30d.credits.toFixed(2)} 积分（阈值 ${config.monthlyCreditLimit}）`,
+    });
+  }
+
+  return {
+    triggered: triggers.length > 0,
+    triggers,
+    todayCredits,
+    todayTokens,
+    predicted30dCredits: prediction.predicted30d.credits,
+    config,
+  };
+}
+
+// 周期对比：今日 vs 昨日、本周 vs 上周、本月 vs 上月
+// 返回每个周期的 tokens/credits/count 及环比变化百分比
+export async function getComparison() {
+  const now = Date.now();
+  const dayMs = 86400000;
+  // 取近 60 天记录足够覆盖本月+上月对比
+  const records = await getRecordsSince(now - 61 * dayMs);
+
+  const ranges = [
+    { key: 'daily', label: '日', curStart: startOfDay(now), prevStart: startOfDay(now - dayMs), span: dayMs },
+    { key: 'weekly', label: '周', curStart: now - 7 * dayMs, prevStart: now - 14 * dayMs, span: 7 * dayMs },
+    { key: 'monthly', label: '月', curStart: now - 30 * dayMs, prevStart: now - 60 * dayMs, span: 30 * dayMs },
+  ];
+
+  const result = ranges.map((r) => {
+    const curEnd = r.curStart + r.span;
+    const prevEnd = r.prevStart + r.span;
+    const cur = { tokens: 0, credits: 0, count: 0 };
+    const prev = { tokens: 0, credits: 0, count: 0 };
+
+    for (const rec of records) {
+      if (rec.timestamp >= r.curStart && rec.timestamp < curEnd) {
+        cur.tokens += rec.totalTokens || 0;
+        cur.credits += rec.credits || 0;
+        cur.count += 1;
+      } else if (rec.timestamp >= r.prevStart && rec.timestamp < prevEnd) {
+        prev.tokens += rec.totalTokens || 0;
+        prev.credits += rec.credits || 0;
+        prev.count += 1;
+      }
+    }
+
+    return {
+      key: r.key,
+      label: r.label,
+      current: cur,
+      previous: prev,
+      changes: {
+        tokens: pctChange(prev.tokens, cur.tokens),
+        credits: pctChange(prev.credits, cur.credits),
+        count: pctChange(prev.count, cur.count),
+      },
+    };
+  });
+
+  return { ranges: result };
+}
+
+function pctChange(prev, cur) {
+  if (prev === 0) return cur > 0 ? null : 0; // null 表示"新增"（之前为 0）
+  return (cur - prev) / prev;
 }
 
 // 清空所有记录

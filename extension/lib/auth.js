@@ -102,7 +102,7 @@ export async function refreshAuthStatus() {
 
 // 诊断：优先路径 A（后端），失败回退路径 B（自有 Key）
 // statsPayload: 聚合统计文本
-export async function diagnose(statsPayload) {
+export async function diagnose(statsPayload, mode = 'quick') {
   const session = await getSession();
   const apiBase = await getApiBase();
 
@@ -115,7 +115,7 @@ export async function diagnose(statsPayload) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.token}`,
         },
-        body: JSON.stringify({ stats: statsPayload }),
+        body: JSON.stringify({ stats: statsPayload, mode }),
       });
 
       if (resp.ok) {
