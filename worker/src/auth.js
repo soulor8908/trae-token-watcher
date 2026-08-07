@@ -74,7 +74,10 @@ export async function handleAuthCallback(request, env, ctx) {
     ctx.waitUntil(purgeExpiredSessions(env.DB));
   }
 
-  // 7. 重定向回扩展 callback 页，通过 fragment 传递（fragment 不会发到服务器）
+  // 7. 重定向到 Worker 自己的 /auth/done 页面
+  // 不用 chrome-extension://（Chrome 安全策略禁止网页 302 到 chrome-extension://）
+  // 扩展 background 通过 chrome.tabs.onUpdated 监听此 URL 变化，提取 token
+  // 用 query params（非 fragment）因为 chrome.tabs API 能看到 query 但看不到 fragment
   const params = new URLSearchParams({
     token,
     expires: String(expiresAt),
@@ -82,7 +85,7 @@ export async function handleAuthCallback(request, env, ctx) {
     avatar: userInfo.avatarUrl || '',
     starred: starred ? '1' : '0',
   });
-  const redirectUrl = `chrome-extension://${extId}/callback.html#${params.toString()}`;
+  const redirectUrl = `${url.origin}/auth/done?${params.toString()}`;
   return Response.redirect(redirectUrl, 302);
 }
 
