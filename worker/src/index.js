@@ -26,6 +26,11 @@ export default {
       if (pathname === '/auth/callback' && method === 'GET') {
         return await handleAuthCallback(request, env, ctx);
       }
+      if (pathname === '/auth/done' && method === 'GET') {
+        return new Response(AUTH_DONE_HTML, {
+          headers: { 'Content-Type': 'text/html;charset=utf-8' },
+        });
+      }
 
       // ---------- 以下路由需要 CORS（扩展 popup 调用）----------
       // OPTIONS 预检
@@ -106,3 +111,27 @@ function json(data, status = 200) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+// OAuth 完成页 — 扩展 background 通过 chrome.tabs.onUpdated 提取 URL query params
+const AUTH_DONE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录成功</title>
+<style>
+  body { margin:0; padding:0; background:#0a0b0f; color:#e8eaed; font-family:-apple-system,"Segoe UI",system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card { text-align:center; padding:40px; }
+  .check { width:48px; height:48px; border-radius:50%; background:#27d98b22; color:#27d98b; display:flex; align-items:center; justify-content:center; font-size:28px; margin:0 auto 20px; }
+  .msg { font-size:16px; }
+  .hint { font-size:12px; color:#6b7280; margin-top:12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="check">✓</div>
+  <div class="msg">登录成功，正在返回扩展…</div>
+  <div class="hint">此页面会自动关闭，无需手动操作</div>
+</div>
+</body>
+</html>`;

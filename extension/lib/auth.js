@@ -54,11 +54,14 @@ export async function clearSession() {
 
 // 发起 GitHub OAuth 登录
 // 打开新标签页到 Worker 的 /auth/github，带上扩展 id
-// 默认走官方 Worker，无需用户预配置
+// Worker 完成后 302 到自己的 /auth/done?token=...（不再跳 chrome-extension://）
+// background 通过 chrome.tabs.onUpdated 监听并提取 token
 export async function loginWithGitHub() {
   const apiBase = await getApiBase();
   const extId = chrome.runtime.id;
   const url = `${apiBase.replace(/\/$/, '')}/auth/github?ext_id=${encodeURIComponent(extId)}`;
+  // 通知 background 开始监听 OAuth 回调
+  chrome.runtime.sendMessage({ type: 'TTW_OAUTH_START' });
   await chrome.tabs.create({ url });
 }
 
