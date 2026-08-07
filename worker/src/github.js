@@ -73,6 +73,10 @@ export async function checkStarred(accessToken, owner, repo) {
 
 // 构造授权跳转 URL
 export function buildAuthorizeUrl(env, state, redirectUri) {
+  // 防御：secret 未配置时直接报错，避免跳转到 GitHub 拿到 client_id=undefined 的 404
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+    throw httpError(500, 'Worker 未配置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET，请用 wrangler secret put 设置');
+  }
   const params = new URLSearchParams({
     client_id: env.GITHUB_CLIENT_ID,
     redirect_uri: redirectUri,

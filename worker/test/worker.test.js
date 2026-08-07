@@ -24,9 +24,17 @@ test('httpError: status 传递', () => {
 });
 
 test('buildAuthorizeUrl: 构造正确', () => {
-  const url = buildAuthorizeUrl({ GITHUB_CLIENT_ID: 'cid' }, 'st', 'https://cb.example.com/auth/callback');
+  const env = { GITHUB_CLIENT_ID: 'cid', GITHUB_CLIENT_SECRET: 'sec' };
+  const url = buildAuthorizeUrl(env, 'st', 'https://cb.example.com/auth/callback');
   assert.ok(url.startsWith('https://github.com/login/oauth/authorize?'));
   assert.ok(url.includes('client_id=cid'));
   assert.ok(url.includes('state=st'));
   assert.ok(url.includes('redirect_uri=')); // URL 编码后的回调地址
+});
+
+test('buildAuthorizeUrl: 缺少 secret 抛 500（防 client_id=undefined 跳转）', () => {
+  assert.throws(
+    () => buildAuthorizeUrl({}, 'st', 'https://cb.example.com/auth/callback'),
+    (err) => err.status === 500 && /GITHUB_CLIENT_ID/.test(err.message),
+  );
 });

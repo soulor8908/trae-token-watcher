@@ -93,6 +93,9 @@ inject.js (主世界拦截) ──postMessage──▶ content.js (隔离世界)
 - **Authorization callback URL** 填：`https://<你的-worker-域名>/auth/callback`
 - 记下 Client ID 和 Client Secret
 
+> ⚠️ **必须** 在第 3 步用 `npm run secret:github-id` 和 `npm run secret:github-secret` 把它们配置成 Worker Secrets。
+> 漏配会导致登录时跳转到 `https://github.com/login/oauth/authorize?client_id=undefined` 并返回 404。
+
 ### 2. 创建 Cloudflare 资源
 
 ```bash
@@ -106,7 +109,7 @@ npx wrangler d1 create trae-token-watcher-db
 
 # 创建 KV 命名空间
 npx wrangler kv namespace create KV
-# 把返回的 id 填入 wrangler.toml
+# 把返回的 id 填入 wrangler.toml（binding 必须保持为 KV，代码用 env.KV 访问）
 
 # 初始化数据库表（本地 + 远程）
 npm run db:init
@@ -140,6 +143,45 @@ npm run deploy
   ├─ 已登录 + 已 Star + 后端可用 → 路径 A（后端转发，限流10次/天，缓存1h）
   └─ 否则 → 路径 B（用户自有 DeepSeek Key 直连，不限次数）
 ```
+
+## 为什么 GitHub 登录要配置后端 API 地址？
+
+Chrome 扩展（MV3）**无法独立完成 GitHub OAuth**，必须借助后端 Worker 中转，原因有三：
+
+1. **`client_secret` 不能放进扩展** — GitHub 换 token 接口要求带 `client_secret`，扩展代码对所有用户可见，放进去会被盗用冒充。所以换 token 必须在 Worker 服务端完成。
+2. **OAuth 回调地址必须是公网 HTTPS** — GitHub 只接受 `https://...` 形式的 callback URL，不接受 `chrome-extension://...`。所以回调只能落到 Worker 的 `/auth/callback`。
+3. **每个用户自部署** — 本项目是 BYO（Bring Your Own）后端，不同用户的 Worker 域名不同。扩展无法预先知道你的 Worker 在哪，所以必须由你在设置页填一次「后端 API 地址」。
+
+完整流程（[worker/src/auth.js](worker/src/auth.js)）：
+
+```
+扩展 popup 点击「用 GitHub 登录」
+   │ chrome.tabs.create(`${apiBase}/auth/github?ext_id=...`)
+   ▼
+Worker /auth/github  → 302 → github.com/login/oauth/authorize?client_id=...
+   │ 用户授权
+   ▼
+GitHub → 302 → Worker /auth/callback?code=...
+   │ Worker 用 client_secret 换 access_token
+   │ 查用户信息 + 查 Star 状态 + 签发 session
+   ▼
+Worker → 302 → chrome-extension://${extId}/callback.html#token=...
+   │ 扩展 callback.js 把 session 存入 chrome.storage.local
+   ▼
+登录完成
+```
+
+所以「后端 API 地址」是扩展发起 OAuth 的入口，没填就找不到 Worker，登录链路从第一步就断掉。
+
+## 常见问题排查
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| 登录跳转到 `client_id=undefined` 后 404 | Worker 没配置 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` secret | `cd worker && npm run secret:github-id`、`npm run secret:github-secret` 重新设置 |
+| 登录后报「Worker 未配置 ...」 | 同上，secret 未生效 | 重新 `wrangler secret put`，并用 `wrangler secret list` 确认 |
+| 已 Star 但诊断报 403 | KV 绑定名错误，Star 缓存写不进 | 检查 `wrangler.toml` 中 KV `binding = "KV"`，重新 `wrangler deploy` |
+| OAuth 回调报 `redirect_uri mismatch` | GitHub OAuth App 的 callback URL 与 Worker 域名不一致 | 去 GitHub OAuth App 设置改为 `https://<worker域名>/auth/callback` |
+| 扩展点登录没反应 | 没配置后端 API 地址 | 在 popup 或设置页填入 Worker 域名并保存 |
 
 ## 后续路线
 

@@ -9,8 +9,9 @@ database_name = "trae-token-watcher-db"
 database_id = "4c09e164-82c1-4ff1-b67d-317684bf4b62"
 
 # KV — Star 状态缓存（TTL 24h）+ 诊断结果缓存
+# 注意：binding 必须是 KV，代码里用 env.KV 访问
 [[kv_namespaces]]
-binding = "TRAE_TOKEN_KV"
+binding = "KV"
 id = "72864e45c2164530b082fc304d558d9a"
 
 # Secrets（通过 wrangler secret put 设置，不要写在这里）:
