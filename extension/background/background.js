@@ -60,6 +60,44 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .then(() => sendResponse({ ok: true }))
         .catch((e) => sendResponse({ ok: false, error: e.message }));
       return true;
+    case 'TTW_OAUTH_START':
+      // 扩展即将打开 OAuth 登录标签页，开始监听 /auth/done 回调
+      awaitingOAuthCallback = true;
+      return false;
+  }
+});
+
+// ---------- OAuth 回调监听 ----------
+// Worker 不再 302 到 chrome-extension://（Chrome 禁止网页导航到扩展 URL）
+// 而是 302 到 Worker 自己的 /auth/done?token=... 页面
+// 扩展 background 通过 chrome.tabs.onUpdated 检测此 URL，提取 token
+let awaitingOAuthCallback = false;
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (!awaitingOAuthCallback) return;
+  const url = changeInfo.url || tab?.url;
+  if (!url) return;
+
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.pathname !== '/auth/done') return;
+    const token = urlObj.searchParams.get('token');
+    if (!token) return;
+
+    awaitingOAuthCallback = false;
+    await chrome.storage.local.set({
+      ttw_session: {
+        token,
+        expires: parseInt(urlObj.searchParams.get('expires') || '0', 10),
+        login: urlObj.searchParams.get('login') || '',
+        avatar: urlObj.searchParams.get('avatar') || '',
+        starred: urlObj.searchParams.get('starred') === '1',
+      },
+    });
+    console.log('[trae-token-watcher] OAuth 登录完成:', urlObj.searchParams.get('login'));
+    chrome.tabs.remove(tabId).catch(() => {});
+  } catch (e) {
+    console.warn('[trae-token-watcher] OAuth 回调处理失败', e);
   }
 });
 
