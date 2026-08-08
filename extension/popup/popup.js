@@ -1,6 +1,6 @@
 // Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 A 优先，回退 B）
 import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison } from '../lib/db.js';
-import { loginWithGitHub, logout, refreshAuthStatus, getSession, getApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
+import { loginWithGitHub, logout, refreshAuthStatus, refreshStarStatus, getSession, getApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
 
 // ---------- 工具函数 ----------
 function fmt(n) {
@@ -739,6 +739,36 @@ function formatDiagnosis(text) {
 }
 
 // ---------- 账号区渲染 ----------
+function updateStarUI(starred) {
+  const starEl = document.getElementById('starStatus');
+  if (starred) {
+    starEl.className = 'account-star starred';
+    starEl.textContent = '★ 已 Star · 享免费诊断';
+  } else {
+    starEl.className = 'account-star not-starred';
+    starEl.innerHTML = '未 Star · <a href="https://github.com/soulor8908/trae-token-watcher" target="_blank">去 Star</a>';
+    // 点击「去 Star」后轮询回查，捕获用户 star 完成的瞬间
+    starEl.querySelector('a')?.addEventListener('click', pollStarRefresh);
+  }
+}
+
+// 「去 Star」点击后轮询强制刷新（每 3s 一次，最多 6 次）
+function pollStarRefresh() {
+  let attempts = 0;
+  const timer = setInterval(async () => {
+    attempts++;
+    try {
+      const r = await refreshStarStatus();
+      if (r.starred) {
+        clearInterval(timer);
+        updateStarUI(true);
+        return;
+      }
+    } catch (_) {}
+    if (attempts >= 6) clearInterval(timer);
+  }, 3000);
+}
+
 async function renderAccount() {
   const guest = document.getElementById('accountGuest');
   const user = document.getElementById('accountUser');
@@ -749,15 +779,16 @@ async function renderAccount() {
     user.style.display = 'flex';
     document.getElementById('userLogin').textContent = status.login;
     document.getElementById('userAvatar').src = status.avatar || '';
+    updateStarUI(!!status.starred);
 
-    const starEl = document.getElementById('starStatus');
-    if (status.starred) {
-      starEl.className = 'account-star starred';
-      starEl.textContent = '★ 已 Star · 享免费诊断';
-    } else {
-      starEl.className = 'account-star not-starred';
-      starEl.innerHTML = '未 Star · <a href="https://github.com/soulor8908/trae-token-watcher" target="_blank">去 Star</a>';
-    }
+    // 异步强制回查 Star 状态（跳过 KV 缓存），与缓存值不一致则更新 UI
+    refreshStarStatus()
+      .then((r) => {
+        if (r.authenticated && !!r.starred !== !!status.starred) {
+          updateStarUI(!!r.starred);
+        }
+      })
+      .catch(() => {});
   } else {
     guest.style.display = 'flex';
     user.style.display = 'none';

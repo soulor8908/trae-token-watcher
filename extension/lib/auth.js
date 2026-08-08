@@ -121,6 +121,39 @@ export async function refreshAuthStatus() {
   }
 }
 
+// 强制回查后端 GitHub Star 状态（跳过 KV 缓存）
+// 用于「去 Star」后立即刷新：调用 /auth/refresh-star，成功则更新本地缓存
+export async function refreshStarStatus() {
+  const session = await getSession();
+  if (!session) return { authenticated: false };
+
+  const apiBase = await getApiBase();
+  if (!apiBase) {
+    return { authenticated: true, starred: session.starred, offline: true };
+  }
+
+  try {
+    const resp = await fetch(`${apiBase.replace(/\/$/, '')}/auth/refresh-star`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    if (!resp.ok) {
+      if (resp.status === 401) await clearSession();
+      return { authenticated: resp.status !== 401, starred: session.starred };
+    }
+    const data = await resp.json();
+    if (data.authenticated) {
+      // 更新本地缓存的 starred 字段
+      await chrome.storage.local.set({
+        [SESSION_KEY]: { ...session, starred: data.starred },
+      });
+    }
+    return data;
+  } catch (_) {
+    return { authenticated: true, starred: session.starred, offline: true };
+  }
+}
+
 // 诊断：优先路径 A（后端），失败回退路径 B（自有 Key）
 // statsPayload: 聚合统计文本
 export async function diagnose(statsPayload, mode = 'quick') {

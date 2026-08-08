@@ -65,6 +65,12 @@
   };
   let refreshTimer = null;
 
+  // 扩展被重新加载/更新后，已注入页面的 chrome.* 绑定会失效
+  // chrome.runtime.id 在 context 失效后变 undefined，用作探针
+  function isContextValid() {
+    return !!(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+  }
+
   function fmt(n) {
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
@@ -77,8 +83,11 @@
   }
 
   async function initWidget() {
-    const { ttw_widget_state: saved } = await chrome.storage.local.get('ttw_widget_state');
-    if (saved) widgetState = { ...widgetState, ...saved };
+    if (!isContextValid()) return;
+    try {
+      const { ttw_widget_state: saved } = await chrome.storage.local.get('ttw_widget_state');
+      if (saved) widgetState = { ...widgetState, ...saved };
+    } catch (_) { /* context 失效，用默认 state */ }
     if (widgetState.visible === false) return;
 
     if (document.body) {
@@ -330,7 +339,10 @@
   }
 
   async function saveWidgetState() {
-    await chrome.storage.local.set({ ttw_widget_state: widgetState });
+    if (!isContextValid()) return; // 扩展已重载，旧 content script 不再能写存储
+    try {
+      await chrome.storage.local.set({ ttw_widget_state: widgetState });
+    } catch (_) { /* context 失效，静默丢弃 */ }
   }
 
   // 从 background 获取今日汇总
