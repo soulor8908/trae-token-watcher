@@ -71,6 +71,61 @@ export async function checkStarred(accessToken, owner, repo) {
   throw httpError(502, `GitHub Star 检查接口返回 ${resp.status}`);
 }
 
+// 公开接口检查 login 是否 Star 了指定仓库（不需要 access_token）
+// 用于持久化 token 缺失时的兜底回查（如老用户尚未重新登录）
+// 限制：未认证 60 次/小时（按出口 IP），且仓库 star 数 > 上限时可能漏判
+const STAR_PUBLIC_MAX_PAGES = 10; // 最多翻 10 页（1000 个最新 stargazer）
+export async function checkStarredPublic(login, owner, repo) {
+  for (let page = 1; page <= STAR_PUBLIC_MAX_PAGES; page++) {
+    const resp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/stargazers?per_page=100&page=${page}`, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'trae-token-watcher',
+      },
+    });
+    if (!resp.ok) {
+      // 403 通常是未认证限流，按未 star 处理避免误放行
+      if (resp.status === 403) return false;
+      throw httpError(502, `GitHub stargazers 接口返回 ${resp.status}`);
+    }
+    const users = await resp.json();
+    if (!Array.isArray(users) || users.length === 0) return false;
+    if (users.some((u) => u && u.login === login)) return true;
+    if (users.length < 100) return false; // 已到最后一页
+  }
+  return false; // 超过上限仍未找到，按未 star 处理
+}
+
+// ---------- access_token 加密存储（AES-GCM）----------
+// 密钥由 SESSION_SECRET 经 SHA-256 派生；secret 变更后旧密文不可解，需重新登录
+async function deriveAesKey(env) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(env?.SESSION_SECRET || ''));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function encryptToken(token, env) {
+  const key = await deriveAesKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(token));
+  return { enc: toHex(new Uint8Array(enc)), iv: toHex(iv) };
+}
+
+export async function decryptToken(encHex, ivHex, env) {
+  const key = await deriveAesKey(env);
+  const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromHex(ivHex) }, key, fromHex(encHex));
+  return new TextDecoder().decode(dec);
+}
+
+function toHex(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function fromHex(hex) {
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return arr;
+}
+
 // 构造授权跳转 URL
 export function buildAuthorizeUrl(env, state, redirectUri) {
   // 防御：secret 未配置时直接报错，避免跳转到 GitHub 拿到 client_id=undefined 的 404

@@ -1,7 +1,7 @@
 // 主入口 — 路由表 + CORS + 错误处理
 // 后端很薄，只做三件事：验证身份、转发诊断、缓存结果
 
-import { handleAuthStart, handleAuthCallback, handleAuthStatus, handleAuthLogout } from './auth.js';
+import { handleAuthStart, handleAuthCallback, handleAuthStatus, handleAuthLogout, handleRefreshStar } from './auth.js';
 import { handleDiagnose } from './diagnose.js';
 import { handleSyncPush, handleSyncPull, handleSyncStatus, handleSyncCursor, handleSyncReset } from './sync.js';
 import { verifySession } from './session.js';
@@ -43,6 +43,9 @@ export default {
 
       if (pathname === '/auth/status' && method === 'GET') {
         return cors(await handleAuthStatus(env, session));
+      }
+      if (pathname === '/auth/refresh-star' && method === 'POST') {
+        return cors(await handleRefreshStar(env, session));
       }
       if (pathname === '/auth/logout' && method === 'POST') {
         return cors(await handleAuthLogout(env, session, request));

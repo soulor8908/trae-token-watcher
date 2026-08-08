@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateToken, hashToken } from '../src/session.js';
-import { httpError, buildAuthorizeUrl } from '../src/github.js';
+import { httpError, buildAuthorizeUrl, encryptToken, decryptToken } from '../src/github.js';
 
 test('generateToken: 64位hex', () => {
   const t = generateToken();
@@ -37,4 +37,19 @@ test('buildAuthorizeUrl: 缺少 secret 抛 500（防 client_id=undefined 跳转�
     () => buildAuthorizeUrl({}, 'st', 'https://cb.example.com/auth/callback'),
     (err) => err.status === 500 && /GITHUB_CLIENT_ID/.test(err.message),
   );
+});
+
+test('encryptToken/decryptToken: 可逆 + 受 SESSION_SECRET 约束', async () => {
+  const env = { SESSION_SECRET: 'salty-secret-32bytes-long-xxxx' };
+  const token = 'gho_abcdef1234567890';
+  const { enc, iv } = await encryptToken(token, env);
+  // 密文与 IV 均为 hex，且不等于明文
+  assert.match(enc, /^[0-9a-f]+$/);
+  assert.match(iv, /^[0-9a-f]{24}$/);
+  assert.notEqual(enc, token);
+  // 同一 secret 可解回原文
+  const dec = await decryptToken(enc, iv, env);
+  assert.equal(dec, token);
+  // 换 secret 则解密失败（GCM 抛错）
+  await assert.rejects(decryptToken(enc, iv, { SESSION_SECRET: 'other-secret' }));
 });

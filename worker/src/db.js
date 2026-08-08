@@ -66,6 +66,28 @@ export async function purgeExpiredSessions(db) {
   } catch (_) { /* 静默失败，不影响主流程 */ }
 }
 
+// ---------- github_tokens ----------
+// 存/取加密后的 GitHub access_token，供 Star 状态回查使用
+export async function saveGithubToken(db, { userId, enc, iv }) {
+  await db
+    .prepare(`
+      INSERT INTO github_tokens (user_id, access_token_enc, access_token_iv) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        access_token_enc = excluded.access_token_enc,
+        access_token_iv = excluded.access_token_iv,
+        updated_at = unixepoch()
+    `)
+    .bind(userId, enc, iv)
+    .run();
+}
+
+export async function getGithubToken(db, userId) {
+  return db
+    .prepare('SELECT access_token_enc, access_token_iv FROM github_tokens WHERE user_id = ?')
+    .bind(userId)
+    .first();
+}
+
 // ---------- usage_quota ----------
 // 获取用户今日已用配额
 export async function getTodayQuota(db, userId) {

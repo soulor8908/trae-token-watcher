@@ -25,7 +25,8 @@ id = "72864e45c2164530b082fc304d558d9a"
 WATCH_REPO_OWNER = "soulor8908"
 WATCH_REPO_NAME = "trae-token-watcher"
 DAILY_QUOTA = 10
-STAR_CACHE_TTL = 86400       # Star 状态缓存 24h（秒）
+STAR_CACHE_TTL = 86400       # Star 状态缓存 24h（秒，已 star 时生效）
+STAR_MISS_CACHE_TTL = 60     # 未 star 状态短缓存 60s，让用户 star 后能尽快刷新
 DIAG_CACHE_TTL = 3600        # 诊断结果缓存 1h（秒）
 
 # 可观测性 — 结构化日志 + 采样追踪

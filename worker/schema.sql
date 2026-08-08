@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+-- GitHub access_token 表：加密存储 OAuth 换来的 access_token，供后续 Star 状态回查
+-- 独立成表 + CREATE IF NOT EXISTS，对已有数据库零迁移（重跑 db:init 即可生效）
+CREATE TABLE IF NOT EXISTS github_tokens (
+  user_id INTEGER PRIMARY KEY,             -- 与 users.id 一一对应
+  access_token_enc TEXT NOT NULL,          -- AES-GCM 密文（hex）
+  access_token_iv TEXT NOT NULL,           -- 加密 IV（hex）
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- 配额表：Star 用户每天限 10 次免费诊断
 -- 以 (user_id, date) 为键，按自然日计数
 CREATE TABLE IF NOT EXISTS usage_quota (

@@ -1,8 +1,8 @@
 // OAuth 流程 — /auth/github 跳转 + /auth/callback 回调 + 状态查询
 // 流程：扩展打开 /auth/github?ext_id=xxx → GitHub 授权 → 回调换 token → 检查 Star → 签发 session → 重定向回扩展
 
-import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, httpError } from './github.js';
-import { upsertUser, purgeExpiredSessions, deleteSession } from './db.js';
+import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, checkStarredPublic, encryptToken, decryptToken, httpError } from './github.js';
+import { upsertUser, saveGithubToken, getGithubToken, purgeExpiredSessions, deleteSession } from './db.js';
 import { issueSession, hashToken } from './session.js';
 
 // GET /auth/github — 跳转到 GitHub 授权页
@@ -63,8 +63,16 @@ export async function handleAuthCallback(request, env, ctx) {
     avatarUrl: userInfo.avatarUrl,
   });
 
-  // 4. 检查 Star 状态（带 KV 缓存，TTL 24h）— 统一用 user_id 作缓存键
-  const starred = await getStarredWithCache(env, accessToken, user.id, userInfo.githubId);
+  // 3.5 持久化加密的 access_token，供后续 Star 状态回查（失败不阻断登录）
+  try {
+    const { enc, iv } = await encryptToken(accessToken, env);
+    await saveGithubToken(env.DB, { userId: user.id, enc, iv });
+  } catch (e) {
+    console.warn('[auth] 持久化 access_token 失败', e.message);
+  }
+
+  // 4. 检查 Star 状态（带 KV 缓存：已 star 24h，未 star 60s）
+  const starred = await getStarredWithCache(env, accessToken, user.id);
 
   // 5. 签发 session
   const { token, expiresAt } = await issueSession(env, user.id);
@@ -89,9 +97,10 @@ export async function handleAuthCallback(request, env, ctx) {
   return Response.redirect(redirectUrl, 302);
 }
 
-// Star 状态检查 + KV 缓存（TTL 24h）
+// Star 状态检查 + KV 缓存
+// 缓存策略：已 star 缓存 24h（极少变化）；未 star 缓存 60s（让用户 star 后能尽快生效）
 // 缓存键：star:u:{user_id}，值：1/0
-export async function getStarredWithCache(env, accessToken, userId, githubId) {
+export async function getStarredWithCache(env, accessToken, userId) {
   const cacheKey = `star:u:${userId}`;
   const cached = await env.KV.get(cacheKey);
   if (cached !== null) {
@@ -100,9 +109,16 @@ export async function getStarredWithCache(env, accessToken, userId, githubId) {
 
   const starred = await checkStarred(accessToken, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
   await env.KV.put(cacheKey, starred ? '1' : '0', {
-    expirationTtl: parseInt(env.STAR_CACHE_TTL || 86400),
+    expirationTtl: parseInt(starred ? env.STAR_CACHE_TTL : (env.STAR_MISS_CACHE_TTL || 60), 10),
   });
   return starred;
+}
+
+// 写 Star 缓存（已 star 长 TTL，未 star 短 TTL）
+async function writeStarCache(env, userId, starred) {
+  await env.KV.put(`star:u:${userId}`, starred ? '1' : '0', {
+    expirationTtl: parseInt(starred ? env.STAR_CACHE_TTL : (env.STAR_MISS_CACHE_TTL || 60), 10),
+  });
 }
 
 // GET /auth/status — 查询当前 session 的登录与 Star 状态
@@ -117,6 +133,44 @@ export async function handleAuthStatus(env, session) {
     authenticated: true,
     login: session.login,
     avatar: session.avatar_url,
+    starred,
+  });
+}
+
+// POST /auth/refresh-star — 强制回查 GitHub Star 状态并刷新 KV 缓存
+// 跳过缓存直接问 GitHub：优先用持久化的 access_token（精确），缺失时用公开 stargazers 兜底
+export async function handleRefreshStar(env, session) {
+  if (!session) {
+    return json({ authenticated: false, error: '未登录' }, 401);
+  }
+
+  let starred = false;
+  let checked = false;
+  try {
+    const tokenRow = await getGithubToken(env.DB, session.user_id);
+    if (tokenRow) {
+      // 有持久化 token：解密后用精确端点回查（204/404）
+      const accessToken = await decryptToken(tokenRow.access_token_enc, tokenRow.access_token_iv, env);
+      starred = await checkStarred(accessToken, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
+      checked = true;
+    } else {
+      // 老用户尚未重新登录、无持久化 token：用公开 stargazers 接口按 login 兜底
+      starred = await checkStarredPublic(session.login, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
+      checked = true;
+    }
+  } catch (e) {
+    // 回查失败（网络/限流/解密失败）：降级读缓存，避免误判
+    console.warn('[refresh-star] 回查失败，降级读缓存', e.message);
+    starred = (await env.KV.get(`star:u:${session.user_id}`)) === '1';
+  }
+
+  if (checked) {
+    await writeStarCache(env, session.user_id, starred);
+  }
+
+  return json({
+    authenticated: true,
+    login: session.login,
     starred,
   });
 }
