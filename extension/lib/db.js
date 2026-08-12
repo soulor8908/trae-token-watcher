@@ -2,14 +2,17 @@
 // 数据流要短：content -> background -> IndexedDB；popup 直读 IndexedDB
 
 const DB_NAME = 'trae-token-watcher';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_RECORDS = 'usage-records';
+const STORE_DIAGNOSES = 'diagnoses';
 
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+
+      // 用量记录表（v1 创建，v2 补 clientId 索引）
       if (!db.objectStoreNames.contains(STORE_RECORDS)) {
         const store = db.createObjectStore(STORE_RECORDS, {
           keyPath: 'id',
@@ -39,6 +42,15 @@ function openDB() {
           }
         };
       }
+
+      // 诊断历史表（v3 新增）
+      if (!db.objectStoreNames.contains(STORE_DIAGNOSES)) {
+        const dstore = db.createObjectStore(STORE_DIAGNOSES, {
+          keyPath: 'id',
+          autoIncrement: true,
+        });
+        dstore.createIndex('timestamp', 'timestamp', { unique: false });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -54,12 +66,15 @@ function genClientId() {
 }
 
 // 写入一条用量记录
+// 去重：对带 conversationId（即 session_id）的记录采用覆盖式去重——同一会话只保留最新一条，
+// 旧记录先删后插；历史会话反复查看、实时会话多轮对话都不会再产生重复。
+// 无 conversationId 的实时请求保持原行为（每条都入库）。
 export async function addRecord(record) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_RECORDS, 'readwrite');
     const store = tx.objectStore(STORE_RECORDS);
-    const req = store.add({
+    const finalRecord = {
       timestamp: Date.now(),
       conversationId: null,
       model: null,
@@ -71,9 +86,35 @@ export async function addRecord(record) {
       source: 'fetch',
       clientId: genClientId(),
       ...record,
-    });
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    };
+    finalRecord.clientId = record.clientId || genClientId();
+
+    const tryInsert = () => {
+      const req = store.add(finalRecord);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    };
+
+    if (finalRecord.conversationId) {
+      // 纯 session_id 去重：同一会话只保留最新一条记录（覆盖式写入）。
+      // 历史会话反复查看、或实时会话多轮对话，都折叠为该 session_id 下的单条最新快照。
+      const idx = store.index('conversationId');
+      const curReq = idx.openCursor(IDBKeyRange.only(finalRecord.conversationId));
+      curReq.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          cursor.delete(); // 删除该会话已有的旧记录
+          cursor.continue();
+        } else {
+          tryInsert(); // 旧的都删完了，写入最新一条
+        }
+      };
+      curReq.onerror = () => tryInsert(); // 索引查询失败则直接插入
+    } else {
+      tryInsert();
+    }
+
+    tx.onerror = () => reject(tx.error);
     tx.oncomplete = () => db.close();
   });
 }
@@ -507,6 +548,111 @@ export async function clearAllRecords() {
     const store = tx.objectStore(STORE_RECORDS);
     const req = store.clear();
     req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// ---------- 诊断历史 ----------
+// 诊断结果持久化，便于回看历史诊断数据。
+// record 字段：
+//   mode: 'quick' | 'deep'
+//   path: 'A' | 'B' | 'A-fallback'
+//   score: number | null   （从诊断文本中解析的效率评分 0-100）
+//   result: string         （诊断全文 Markdown）
+//   summary: object|null   （诊断时刻的用量快照，便于对比历史变化）
+//   meta: object           （路径 A 的配额/缓存等附加信息）
+export async function addDiagnosis(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readwrite');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.add({
+      timestamp: Date.now(),
+      mode: 'quick',
+      path: 'B',
+      score: null,
+      result: '',
+      summary: null,
+      meta: {},
+      ...record,
+    });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 读取最近的诊断记录（按时间倒序，默认 50 条）
+export async function getDiagnoses(limit = 50) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readonly');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.openCursor(null, 'prev'); // 最新在前
+    const results = [];
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor && results.length < limit) {
+        results.push(cursor.value);
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(results);
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// 按 id 读取单条诊断（透传用，当前 UI 直接用列表里的完整对象）
+export async function getDiagnosisById(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readonly');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 删除单条诊断记录
+export async function deleteDiagnosis(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readwrite');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.delete(id);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 清空全部诊断历史
+export async function clearDiagnoses() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readwrite');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.clear();
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+// 诊断历史条数（列表头展示用）
+export async function countDiagnoses() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DIAGNOSES, 'readonly');
+    const store = tx.objectStore(STORE_DIAGNOSES);
+    const req = store.count();
+    req.onsuccess = () => resolve(req.result || 0);
     req.onerror = () => reject(req.error);
     tx.oncomplete = () => db.close();
   });

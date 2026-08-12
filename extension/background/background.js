@@ -137,6 +137,11 @@ async function handleUsage(payload, sender) {
       url: payload.url || '',
       source: payload.source || 'fetch',
       tabId: sender.tab?.id || null,
+      // 历史会话用真实会话时间；实时数据用采集时刻（inject 已计算好）
+      ...(payload.timestamp != null ? { timestamp: payload.timestamp } : {}),
+      ...(payload.collectedAt != null ? { collectedAt: payload.collectedAt } : {}),
+      ...(payload.isHistorical != null ? { isHistorical: payload.isHistorical } : {}),
+      ...(payload.sessionTime != null ? { sessionTime: payload.sessionTime } : {}),
       ...(payload.remaining != null ? { remaining: payload.remaining } : {}),
       ...(payload.cacheWriteTokens != null ? { cacheWriteTokens: payload.cacheWriteTokens } : {}),
       ...(payload.credits != null ? { credits: payload.credits } : {}),

@@ -962,6 +962,88 @@ body {
   color: var(--muted2);
 }
 
+/* ===== 诊断历史 ===== */
+.dh-head-actions { display: flex; align-items: center; gap: 8px; }
+.diag-history { display: flex; flex-direction: column; gap: 8px; }
+.dh-item {
+  background: var(--bg2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.dh-item:hover { border-color: var(--rule2); }
+.dh-item.expanded { border-color: var(--accent); }
+.dh-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dh-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted2);
+  flex-shrink: 0;
+}
+.dh-tags { display: flex; align-items: center; gap: 6px; }
+.dh-mode {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.dh-score {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--amber);
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: #e6a23c22;
+}
+.dh-del {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted2);
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.dh-del:hover { color: var(--red); background: rgba(255, 107, 107, 0.12); }
+.dh-preview {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dh-detail {
+  display: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule2);
+}
+.dh-item.expanded .dh-detail { display: block; }
+.dh-detail .diag-h { margin-top: 4px; }
+.dh-snap {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted2);
+}
+
 /* Buttons */
 .btn {
   background: var(--bg3);

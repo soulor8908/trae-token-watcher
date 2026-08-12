@@ -1,4 +1,4 @@
-// MAIN WORLD 注入脚本 v7 — 适配 TRAE get_session_usage 真实数据结构
+// MAIN WORLD 注入脚本 v8 — 用 chat_sessions.created_at 作为真实会话时间
 //
 // === v7 改进（根因修复）===
 // v6 问题：真正的 token 数据在 get_session_usage 接口响应体里，但未采集到：
@@ -13,6 +13,15 @@
 //   - MODEL_KEYS 增加 model_name
 //   - 增加积分/费用字段：credits/cost_money/amount
 //   - 增加用户提问预览：user_input_preview
+//
+// === v8 改进（真实会话时间）===
+// 问题：查看历史会话抓到的 get_session_usage 是历史真实用量，但其响应里没有时间字段
+//       （usage_time 恒为 0），旧逻辑把"采集时刻 Date.now()"当成对话时间 —— 错。
+// 修复：真实对话时间在 chat_sessions 列表/详情响应的 created_at（毫秒时间戳）。
+//       usage 的 session_id 与 chat_sessions 的 chat_session_id 同源（ID 前 8 位 = created_at/1000 十六进制），
+//       建一张 sessionId→createdAt 映射优先用它；映射未命中时改用 session_id 前缀(snowflake)反推 created_at，
+//       详情拉取仅作异步元数据补充，确保历史会话一定归到真实发生时间而非采集时刻。
+//       这样历史会话会被归到它真实发生的那天，"今日用量"也不会被历史查看虚增。
 (function () {
   'use strict';
 
@@ -25,6 +34,11 @@
   const debugLog = [];
   const sampledUrls = new Map(); // URL → 已采样次数
   const SAMPLE_LIMIT = 2;
+  // 会话真实时间缓存：chat_sessions 列表/详情响应 → { createdAt, updatedAt, title, mode }
+  // key 为 chat_session_id（与 usage 的 session_id 同源）
+  const sessionInfoMap = new Map();
+  const pendingSessionFetches = new Map(); // 并发去重的详情拉取
+  const SESSION_MAP_MAX = 400;
 
   function pushDebug(entry) {
     if (!DEBUG) return;
@@ -224,6 +238,7 @@
             costMoney: pickNum(traeGroup, ['cost_money_float', 'cost_money']),
             amount: pickNum(traeGroup, ['amount_float', 'amount']),
             userInputPreview: pickStr(traeGroup, ['user_input_preview']),
+            sessionTime: extractSessionTime(traeGroup) || extractSessionTime(obj),
           };
         }
       }
@@ -288,6 +303,7 @@
       ...usage,
       model: pickStr(obj, MODEL_KEYS),
       conversationId: pickStr(obj, CONV_KEYS),
+      sessionTime: extractSessionTime(obj),
     };
   }
 
@@ -307,6 +323,168 @@
       if (typeof obj[k] === 'string' && obj[k].trim() !== '') return obj[k].trim();
     }
     return null;
+  }
+
+  // ---------- 会话时间提取 ----------
+  // 历史会话被查看时，抓到的 get_session_usage 数据是历史真实用量，
+  // 其实际发生时间应取自响应里的会话时间字段，而非采集时刻（Date.now）。
+  // 这里健壮地递归扫描常见时间字段，归一化为毫秒时间戳。
+  const SESSION_TIME_KEYS = {
+    session_time: 100, sessionTime: 100, sessiontimestamp: 100, session_timestamp: 100,
+    conv_time: 95, convTime: 95, conversation_time: 95, conversationTime: 95,
+    create_time: 90, createTime: 90, created_at: 90, createdAt: 90, create_at: 90,
+    chat_time: 80, chatTime: 80, msg_time: 80, msgTime: 80,
+    gen_time: 70, genTime: 70,
+    update_time: 60, updateTime: 60, updated_at: 60, updatedAt: 60,
+    time: 40, timestamp: 40, date: 40, datetime: 40, send_time: 40, sendTime: 40,
+  };
+  const SESSION_TIME_MIN = Date.parse('2020-01-01');
+  const SESSION_TIME_MAX_FUTURE = 86400000; // 允许未来 1 天（时钟误差）
+
+  function normalizeTimeVal(v) {
+    if (typeof v === 'number') {
+      if (v > 1e17) return null;            // 纳秒，非时间
+      if (v >= 1e12) return Math.floor(v);  // 毫秒
+      if (v >= 1e9 && v < 1e12) return Math.floor(v * 1000); // 秒
+      return null;                          // 太小，非时间
+    }
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (/^\d{10}$/.test(s)) return parseInt(s, 10) * 1000;
+      if (/^\d{13}$/.test(s)) return parseInt(s, 10);
+      const t = Date.parse(s);
+      if (!isNaN(t)) return t;
+    }
+    return null;
+  }
+
+  function extractSessionTime(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    let best = null; // { ms, score }
+    const walk = (node, depth) => {
+      if (!node || typeof node !== 'object' || depth > 4) return;
+      for (const [k, v] of Object.entries(node)) {
+        const lk = k.toLowerCase();
+        let matched = null;
+        for (const cand in SESSION_TIME_KEYS) {
+          const lc = cand.toLowerCase();
+          if (lk === lc || lk.endsWith(lc)) { matched = cand; break; }
+        }
+        if (matched) {
+          const ms = normalizeTimeVal(v);
+          const now = Date.now();
+          if (ms != null && ms >= SESSION_TIME_MIN && ms <= now + SESSION_TIME_MAX_FUTURE) {
+            const score = SESSION_TIME_KEYS[matched];
+            if (!best || score > best.score) best = { ms, score };
+          }
+        } else if (v && typeof v === 'object' && depth < 3) {
+          walk(v, depth + 1);
+        }
+      }
+    };
+    walk(obj, 0);
+    return best ? best.ms : null;
+  }
+
+  // ---------- 会话真实时间（chat_sessions.created_at）----------
+  // 历史会话被查看时，get_session_usage 只知道 session_id，没有时间；
+  // 真正的对话时间在 chat_sessions 列表/详情响应的 created_at 字段（毫秒时间戳字符串）。
+  // 这里建一张 sessionId → createdAt 的映射，记录用量时优先用它当 timestamp。
+  function normalizeTimeStr(v) {
+    if (v == null) return null;
+    if (typeof v === 'number') return normalizeTimeVal(v);
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (/^\d+$/.test(s)) return parseInt(s, 10); // 纯数字 → 毫秒时间戳
+      const t = Date.parse(s);
+      return isNaN(t) ? null : t;
+    }
+    return null;
+  }
+
+  function captureSessions(text, url) {
+    if (!text || !/chat_session_id/.test(text)) return;
+    if (!(url && /\/chat_sessions\b/i.test(getPath(url)))) return; // 只在会话列表/详情响应里解析
+    let json;
+    try { json = JSON.parse(text); } catch (_) { return; }
+    const data = json && json.data;
+    const items = Array.isArray(data?.items)
+      ? data.items
+      : (data && data.chat_session_id ? [data] : null);
+    if (!items || items.length === 0) return;
+    for (const it of items) {
+      const id = it?.chat_session_id || it?.session_id;
+      if (!id) continue;
+      const createdAt = normalizeTimeStr(it.created_at);
+      if (!createdAt) continue;
+      sessionInfoMap.set(id, {
+        createdAt,
+        updatedAt: normalizeTimeStr(it.updated_at),
+        title: typeof it.title === 'string' ? it.title : null,
+        mode: typeof it.mode === 'string' ? it.mode : null,
+      });
+    }
+    if (sessionInfoMap.size > SESSION_MAP_MAX) {
+      const keys = [...sessionInfoMap.keys()].slice(0, sessionInfoMap.size - SESSION_MAP_MAX);
+      for (const k of keys) sessionInfoMap.delete(k);
+    }
+    pushDebug({ type: 'sessions-captured', count: sessionInfoMap.size });
+  }
+
+  // 从 session_id 反推 created_at：Trae 的 session_id 是 snowflake ID，
+  // 前 8 位十六进制 = 创建时间（秒）。已用真实样本验证：chat_session_id 前 8 位
+  // 十六进制 == chat_sessions.created_at/1000（如 6a34972e == 1781831470 == 1781831470369/1000）。
+  // 这是零网络开销、100% 可靠的兜底，覆盖「会话不在已捕获列表里」的情形。
+  function deriveTimeFromSessionId(id) {
+    if (typeof id !== 'string' || id.length < 8) return null;
+    const hex = id.slice(0, 8).toLowerCase();
+    if (!/^[0-9a-f]{8}$/.test(hex)) return null;
+    const secs = parseInt(hex, 16);
+    // 合理区间：2020-01-01 ~ 2033 年（秒）。超出视为非 snowflake，放弃反推。
+    if (!secs || secs < 1577836800 || secs > 2000000000) return null;
+    return secs * 1000;
+  }
+
+  // 异步补充：拉会话详情，拿到权威 created_at + title/mode（仅用于后续记录与元数据，不阻塞本次记录）
+  function refillSession(conversationId) {
+    if (!conversationId || pendingSessionFetches.has(conversationId)) return;
+    const p = (async () => {
+      try {
+        const r = await fetch(`/api/remote/v1/chat_sessions/${conversationId}`, {
+          headers: { accept: 'application/json' },
+        });
+        const j = await r.json();
+        const item = j && j.data;
+        if (item && item.chat_session_id) {
+          const createdAt = normalizeTimeStr(item.created_at);
+          if (createdAt) {
+            sessionInfoMap.set(item.chat_session_id, {
+              createdAt,
+              updatedAt: normalizeTimeStr(item.updated_at),
+              title: typeof item.title === 'string' ? item.title : null,
+              mode: typeof item.mode === 'string' ? item.mode : null,
+            });
+          }
+        }
+      } catch (_) {}
+    })();
+    pendingSessionFetches.set(conversationId, p);
+    p.finally(() => pendingSessionFetches.delete(conversationId));
+  }
+
+  // 解析某 session_id 的真实时间：
+  //   1) 优先命中内存映射（来自 chat_sessions 列表/详情的真实 created_at，最权威）
+  //   2) 否则用 session_id 反推（snowflake 前缀，零网络开销、100% 可靠兜底）
+  //   3) 同时异步拉详情补充元数据（不阻塞本次记录）
+  // 这样历史会话被查看时，记录会归到它真实发生的那天，而不会是采集时刻。
+  async function resolveSessionTime(conversationId, fallback) {
+    if (!conversationId) return fallback || null;
+    if (sessionInfoMap.has(conversationId)) {
+      return sessionInfoMap.get(conversationId).createdAt;
+    }
+    const derived = deriveTimeFromSessionId(conversationId);
+    refillSession(conversationId); // 异步补充更权威的时间 + 元数据，不影响本次
+    return derived || fallback || null;
   }
 
   // ---------- SSE 解析（支持命名事件）----------
@@ -413,9 +591,10 @@
   // （get_session_usage 是 POST，相同 URL 不同 body，不能按 URL 去重）
   const seenRequests = new Map();
   const DEDUP_WINDOW = 3000;
-  function shouldRecord(conversationId, url, source) {
-    // 优先用 conversationId 去重；无 conversationId 时用 url
-    const key = `${conversationId || url}::${source}`;
+  function shouldRecord(conversationId, url, source, disc) {
+    // 优先用 conversationId 去重；无 conversationId 时用 url。
+    // disc 注入会话时间 + token 总量，使同一历史会话反复查看能被识别为重复（跨 3s 窗口）。
+    const key = `${conversationId || url}::${source}::${disc || ''}`;
     const now = Date.now();
     const last = seenRequests.get(key);
     if (last && now - last < DEDUP_WINDOW) return false;
@@ -428,7 +607,7 @@
     return true;
   }
 
-  function reportUsage(usage, url, source, requestMeta) {
+  async function reportUsage(usage, url, source, requestMeta) {
     if (!usage) return;
 
     let model = usage.model || usage._model || requestMeta?.model || null;
@@ -442,18 +621,27 @@
       if (ctx) model = ctx.model || ctx.agentType;
     }
 
-    if (!shouldRecord(conversationId, url, source)) return;
+    // 真实会话时间：优先 chat_sessions.created_at（已落 map），否则回退到响应里扫到的时间，再否则用采集时刻。
+    // 注意：get_session_usage 响应里没有时间字段（usage_time 恒为 0），所以 fallback 到这里通常已是 null。
+    const realTime = await resolveSessionTime(conversationId, usage.sessionTime || null);
+    // 去重 key 注入真实时间 + token 总量，使同一历史会话反复查看被识别为重复（跨 3s 窗口）
+    const disc = `${realTime || ''}::${usage.totalTokens || 0}`;
 
+    if (!shouldRecord(conversationId, url, source, disc)) return;
+
+    const now = Date.now();
     const payload = {
       ...usage,
       url, source,
       model, conversationId,
-      timestamp: Date.now(),
+      timestamp: realTime != null ? realTime : now,
+      collectedAt: now,
+      isHistorical: realTime != null,
     };
     delete payload._source; delete payload._model; delete payload._agent; delete payload._session;
 
     log('记录 token:', payload);
-    pushDebug({ type: 'usage-recorded', source, url, model, inputTokens: payload.inputTokens, outputTokens: payload.outputTokens, totalTokens: payload.totalTokens, conversationId, credits: payload.credits, costMoney: payload.costMoney });
+    pushDebug({ type: 'usage-recorded', source, url, model, inputTokens: payload.inputTokens, outputTokens: payload.outputTokens, totalTokens: payload.totalTokens, conversationId, credits: payload.credits, costMoney: payload.costMoney, realTime, isHistorical: payload.isHistorical });
     postUsage(payload);
   }
 
@@ -492,6 +680,7 @@
           pushDebug({ type: 'fetch', method, url, status: response.status, ct, bodyLen: text.length, bodyPreview: text.slice(0, 2000), headerUsage: !!headerUsage });
           const bodyUsage = tryParseBody(text, ct);
           if (bodyUsage) reportUsage(bodyUsage, url, 'fetch-body', requestMeta);
+          captureSessions(text, url);
         }).catch(() => {});
       }
     } catch (e) {
@@ -533,12 +722,13 @@
           if (headerUsage) reportUsage(headerUsage, url, 'xhr-header', self._ttw_meta);
           const ct = self.getResponseHeader('content-type') || '';
           const text = self.responseText || '';
-          if (isApi || ct.includes('event-stream')) {
-            log(`XHR resp: ${text.length} 字符 | ct: ${ct}`);
-            pushDebug({ type: 'xhr', url, ct, bodyLen: text.length, bodyPreview: text.slice(0, 2000), headerUsage: !!headerUsage });
-            const bodyUsage = tryParseBody(text, ct);
-            if (bodyUsage) reportUsage(bodyUsage, url, 'xhr-body', self._ttw_meta);
-          }
+            if (isApi || ct.includes('event-stream')) {
+              log(`XHR resp: ${text.length} 字符 | ct: ${ct}`);
+              pushDebug({ type: 'xhr', url, ct, bodyLen: text.length, bodyPreview: text.slice(0, 2000), headerUsage: !!headerUsage });
+              const bodyUsage = tryParseBody(text, ct);
+              if (bodyUsage) reportUsage(bodyUsage, url, 'xhr-body', self._ttw_meta);
+              captureSessions(text, url);
+            }
         } catch (e) {
           log('XHR 拦截异常:', e);
         }
@@ -657,6 +847,6 @@
     }
   });
 
-  console.log(TAG, 'token 拦截器 v6 已注入（过滤补全噪音 + 命名事件SSE）');
+  console.log(TAG, 'token 拦截器 v8 已注入（真实会话时间=snowflake id 反推 + chat_sessions.created_at）');
   if (DEBUG) console.log(TAG, '调试已开启 | 查看拦截记录: window.__ttw_debug_log | 关闭: localStorage.removeItem("' + DEBUG_KEY + '")');
 })();

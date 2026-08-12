@@ -1,5 +1,5 @@
 // Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 A 优先，回退 B）
-import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison } from '../lib/db.js';
+import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison, addDiagnosis, getDiagnoses, deleteDiagnosis, clearDiagnoses } from '../lib/db.js';
 import { loginWithGitHub, logout, refreshAuthStatus, refreshStarStatus, getSession, getApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
 
 // ---------- 工具函数 ----------
@@ -531,6 +531,15 @@ async function diagnose() {
       resultEl.innerHTML = formatDiagnosis(outcome.result) + `<div class="diag-meta">${quotaInfo}</div>`;
       resultEl.className = 'diag-result show';
       hintEl.textContent = '';
+      // 保存诊断历史
+      await saveDiagnosis({
+        mode,
+        path: 'A',
+        result: outcome.result,
+        score: extractScore(outcome.result),
+        summary: buildDiagSnapshot(summary),
+        meta: { cached: outcome.cached, quotaUsed: outcome.quotaUsed, quotaTotal: outcome.quotaTotal },
+      });
       return;
     }
     if (outcome && outcome.fallback === 'B' && outcome.reason) {
@@ -553,6 +562,15 @@ async function diagnose() {
     resultEl.innerHTML = formatDiagnosis(content) + `<div class="diag-meta">[路径 B · ${modeTag} · 自有 Key]</div>`;
     resultEl.className = 'diag-result show';
     hintEl.textContent = '';
+    // 保存诊断历史
+    await saveDiagnosis({
+      mode,
+      path: 'B',
+      result: content,
+      score: extractScore(content),
+      summary: buildDiagSnapshot(summary),
+      meta: {},
+    });
   } catch (e) {
     resultEl.textContent = `诊断失败: ${e.message}`;
     resultEl.className = 'diag-result show error';
@@ -738,6 +756,122 @@ function formatDiagnosis(text) {
   return html;
 }
 
+// ---------- 诊断历史 ----------
+// 诊断时刻的用量快照：展开历史时展示，便于对比历史变化
+function buildDiagSnapshot(summary) {
+  const { buckets, cacheStats } = summary;
+  return {
+    todayTotal: buckets.today.total,
+    todayCredits: buckets.today.credits,
+    weekTotal: buckets.week.total,
+    weekCredits: buckets.week.credits,
+    monthTotal: buckets.month.total,
+    monthCredits: buckets.month.credits,
+    allTotal: buckets.all.total,
+    allCredits: buckets.all.credits,
+    allCount: buckets.all.count,
+    cacheRate: cacheStats?.overall ?? 0,
+  };
+}
+
+// 从诊断文本中解析效率评分（0-100）
+function extractScore(text) {
+  if (!text) return null;
+  let m = text.match(/(\d{1,3})\s*\/\s*100/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 0 && n <= 100) return n;
+  }
+  m = text.match(/评分[：:\s]*(\d{1,3})/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 0 && n <= 100) return n;
+  }
+  return null;
+}
+
+// 持久化一条诊断并刷新列表
+async function saveDiagnosis(rec) {
+  try {
+    await addDiagnosis(rec);
+    await renderDiagHistory();
+  } catch (e) {
+    console.error('[diag-history] 保存诊断失败', e);
+  }
+}
+
+// 渲染诊断历史列表（最新在前）
+async function renderDiagHistory() {
+  const container = document.getElementById('diagHistory');
+  if (!container) return;
+  const list = await getDiagnoses(50);
+
+  const hintEl = document.getElementById('diagHistoryHint');
+  if (hintEl) hintEl.textContent = list.length > 0 ? `${list.length} 条记录` : '';
+
+  if (list.length === 0) {
+    container.innerHTML = '<div class="empty">暂无诊断记录，点击上方「诊断我的 Token 用法」生成首条</div>';
+    return;
+  }
+
+  container.innerHTML = list.map((d) => {
+    const scoreTxt = d.score != null ? `<span class="dh-score">评分 ${d.score}</span>` : '';
+    let pathTag;
+    if (d.path === 'A') pathTag = '<span class="tag tag-green">路径 A</span>';
+    else if (d.path === 'A-fallback') pathTag = '<span class="tag tag-amber">A→B</span>';
+    else pathTag = '<span class="tag tag-amber">路径 B</span>';
+    const modeTxt = d.mode === 'deep' ? '深度' : '快速';
+    const preview = escapeHtml((d.result || '').replace(/\n+/g, ' ').trim().slice(0, 90));
+    return `
+      <div class="dh-item" data-id="${d.id}">
+        <div class="dh-head">
+          <span class="dh-time">${fmtTime(d.timestamp)}</span>
+          <span class="dh-tags">
+            ${pathTag}
+            <span class="dh-mode">${modeTxt}</span>
+            ${scoreTxt}
+          </span>
+          <button class="dh-del" data-id="${d.id}" title="删除此条">✕</button>
+        </div>
+        <div class="dh-preview">${preview}</div>
+        <div class="dh-detail">
+          ${formatDiagnosis(d.result || '')}
+          ${snapshotHtml(d.summary)}
+        </div>
+      </div>`;
+  }).join('');
+
+  // 点击切换展开/收起
+  container.querySelectorAll('.dh-item').forEach((el) => {
+    el.addEventListener('click', (ev) => {
+      if (ev.target.classList.contains('dh-del')) return;
+      el.classList.toggle('expanded');
+    });
+  });
+  // 单条删除
+  container.querySelectorAll('.dh-del').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const id = Number(btn.dataset.id);
+      await deleteDiagnosis(id);
+      await renderDiagHistory();
+    });
+  });
+}
+
+// 诊断快照展示块
+function snapshotHtml(s) {
+  if (!s || s.allTotal == null) return '';
+  const cred = (n) => (typeof n === 'number' ? n.toFixed(2) : n);
+  return `
+    <div class="dh-snap">
+      <span>今日 Σ${fmt(s.todayTotal)} · ◈${cred(s.todayCredits)}</span>
+      <span>本月 Σ${fmt(s.monthTotal)} · ◈${cred(s.monthCredits)}</span>
+      <span>缓存率 ${((s.cacheRate || 0) * 100).toFixed(1)}%</span>
+      <span>累计 Σ${fmt(s.allTotal)} · ${s.allCount} 次</span>
+    </div>`;
+}
+
 // ---------- 账号区渲染 ----------
 function updateStarUI(starred) {
   const starEl = document.getElementById('starStatus');
@@ -866,6 +1000,15 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   document.querySelectorAll('.tab-panel').forEach((p) => {
     p.classList.toggle('active', p.id === `tab-${target}`);
   });
+  // 切到诊断 Tab 时刷新历史，确保最新数据
+  if (target === 'diag') renderDiagHistory();
+});
+
+// ---------- 诊断历史：清空全部 ----------
+document.getElementById('clearDiagHistoryBtn').addEventListener('click', async () => {
+  if (!window.confirm('确定清空全部诊断历史？此操作不可撤销。')) return;
+  await clearDiagnoses();
+  await renderDiagHistory();
 });
 
 // ---------- 模型视图切换（Token / 成本）----------
@@ -885,6 +1028,7 @@ document.getElementById('modelToggle').addEventListener('click', (e) => {
   await loadWidgetState();
   await renderAccount();
   await renderSummary();
+  await renderDiagHistory();
   // 每 5 秒刷新一次（popup 打开期间）
   setInterval(renderSummary, 5000);
 })();
