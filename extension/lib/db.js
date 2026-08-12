@@ -384,9 +384,7 @@ export async function predictUsage() {
   // 按天聚合（最近 14 天）
   const dailyMap = new Map();
   for (const r of records) {
-    const d = new Date(r.timestamp);
-    d.setHours(0, 0, 0, 0);
-    const key = d.toISOString().slice(0, 10);
+    const key = dayKeyOf(r.timestamp); // 本地日期，与 getSummary/getComparison 一致
     if (!dailyMap.has(key)) {
       dailyMap.set(key, { date: key, tokens: 0, credits: 0, count: 0 });
     }
@@ -444,8 +442,8 @@ export async function predictUsage() {
   const predicted7dCredits = predictedDailyCredits * 7;
   const predicted30dCredits = predictedDailyCredits * 30;
 
-  // 今日已用
-  const todayKey = new Date().toISOString().slice(0, 10);
+  // 今日已用（本地日期，与上方按天聚合、以及 getSummary 的"今日"口径一致）
+  const todayKey = dayKeyOf(Date.now());
   const todayData = days.find((d) => d.date === todayKey) || { tokens: 0, credits: 0, count: 0 };
 
   const result = {

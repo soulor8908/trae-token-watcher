@@ -65,6 +65,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // 持久化到 storage：SW 被杀后仍能识别回调（内存布尔会在 SW 重启时丢失）
       chrome.storage.local.set({ ttw_awaiting_oauth: true });
       return false;
+    case 'TTW_OPEN_FULL_PANEL':
+      // 由 content script（浮窗全屏按钮）触发。
+      // 放在 background 打开标签页：service worker 上下文始终有效，
+      // 避免浮窗里的 content script 在扩展被重载后「上下文失效」导致
+      // chrome.tabs.create 静默失败、点击全屏没反应。
+      chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') + '?full=1' });
+      return false;
   }
 });
 

@@ -281,11 +281,26 @@
     const header = $('header');
 
     // 全屏：在新标签页打开完整面板（与 popup 全屏逻辑一致，绕过浮窗尺寸限制）
+    // 优先让 background（service worker，上下文始终有效）来打开标签页；
+    // content script 在扩展被重载后「上下文失效」，直接 chrome.tabs.create 会静默失败。
+    // 因此一律走 background，并保留直接调用作为兜底，且不再吞掉错误便于排查。
     $('btnFull').addEventListener('click', (e) => {
       e.stopPropagation();
+      const fullUrl = () => chrome.runtime.getURL('popup/popup.html') + '?full=1';
+      const openDirect = () => {
+        try {
+          chrome.tabs.create({ url: fullUrl() });
+        } catch (err) {
+          console.error('[TTW] 全屏面板打开失败:', err);
+        }
+      };
       try {
-        chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') + '?full=1' });
-      } catch (_) {}
+        const p = chrome.runtime.sendMessage({ type: 'TTW_OPEN_FULL_PANEL' });
+        if (p && typeof p.catch === 'function') p.catch(openDirect);
+      } catch (_) {
+        // sendMessage 同步抛错（上下文失效）：直接兜底
+        openDirect();
+      }
     });
 
     // 收起 / 展开
