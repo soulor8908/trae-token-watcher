@@ -484,6 +484,14 @@ body.full-mode .app { max-width: 560px; margin: 0 auto; }
 
 /* ===== 会话级明细 ===== */
 .session-list { display: flex; flex-direction: column; gap: 8px; }
+.sess-sentinel {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted2);
+  padding: 12px 0 6px;
+  min-height: 20px;
+}
+.sess-sentinel.done { color: var(--rule2); }
 .sess-row {
   background: var(--bg2);
   border: 1px solid var(--rule);

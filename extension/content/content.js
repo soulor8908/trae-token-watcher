@@ -261,7 +261,7 @@
     .collapsed-body {
       display: none;
       flex-direction: column; align-items: center; justify-content: center;
-      padding: 10px 8px; cursor: pointer; gap: 1px;
+      padding: 10px 8px; cursor: move; gap: 1px;
     }
     .coll-val {
       font-size: 16px; font-weight: 700; color: #27d98b;
@@ -311,7 +311,10 @@
       saveWidgetState();
     });
 
+    // 收起态小条既能拖动也能单击展开：用 dragJustHappened 区分，避免拖动后误判为单击而展开
+    let dragJustHappened = false;
     $('collBody').addEventListener('click', () => {
+      if (dragJustHappened) { dragJustHappened = false; return; }
       widgetState.collapsed = false;
       widget.classList.remove('collapsed');
       saveWidgetState();
@@ -325,18 +328,25 @@
       saveWidgetState();
     });
 
-    // 拖拽
+    // 拖拽：展开态靠 header；收起态 header 被隐藏（display:none），必须让 collapsed-body 也能拖动
     let dragging = false;
     let offsetX = 0, offsetY = 0;
+    let dragStartX = 0, dragStartY = 0;
 
-    header.addEventListener('mousedown', (e) => {
+    const startDrag = (e) => {
       if (e.target.tagName === 'BUTTON') return;
       dragging = true;
+      dragJustHappened = false;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
       const rect = widgetHost.getBoundingClientRect();
       offsetX = e.clientX - rect.left;
       offsetY = e.clientY - rect.top;
       e.preventDefault();
-    });
+    };
+
+    header.addEventListener('mousedown', startDrag);
+    $('collBody').addEventListener('mousedown', startDrag);
 
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
@@ -346,6 +356,10 @@
       y = Math.max(0, Math.min(y, window.innerHeight - 30));
       widgetHost.style.left = x + 'px';
       widgetHost.style.top = y + 'px';
+      // 位移超过阈值才算拖动，避免轻微抖动被误判为拖动而阻止展开
+      if (Math.abs(e.clientX - dragStartX) > 4 || Math.abs(e.clientY - dragStartY) > 4) {
+        dragJustHappened = true;
+      }
     });
 
     document.addEventListener('mouseup', () => {

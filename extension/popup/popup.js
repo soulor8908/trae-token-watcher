@@ -94,8 +94,8 @@ async function renderSummary() {
   // 按模型缓存率
   renderCacheByModel(cacheStats);
 
-  // 会话级明细
-  renderSessions(bySession);
+  // 会话级明细（定时刷新保留已加载的分页状态，避免被清空）
+  renderSessions(bySession, { preserve: true });
 
   // 最近记录
   const records = await getAllRecords(20);
@@ -127,8 +127,27 @@ function animateNum(id, target) {
 }
 function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
 
+// ---------- 渲染增量守卫 ----------
+// 每次定时刷新若数据未变化则跳过 DOM 重建，避免界面闪烁（整页闪一下）与
+// 状态（记录展开、会话滚动/分页、模型视图等）被重置。
+const _renderSigs = Object.create(null);
+function renderChanged(key, data) {
+  let sig;
+  try {
+    sig = (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean')
+      ? String(data)
+      : JSON.stringify(data);
+  } catch (_) {
+    sig = 'n/a';
+  }
+  if (_renderSigs[key] === sig) return false; // 未变化，跳过重建
+  _renderSigs[key] = sig;
+  return true; // 首次渲染或数据已变化
+}
+
 // ---------- 趋势图 ----------
 function renderChart(trend) {
+  if (!renderChanged('chart', trend)) return;
   const chart = document.getElementById('chart');
   if (!trend || trend.length === 0) {
     chart.innerHTML = '<div class="chart-empty">暂无趋势数据</div>';
@@ -153,6 +172,7 @@ function renderChart(trend) {
 
 // ---------- 缓存命中率 ----------
 function renderCacheStats(cacheStats, buckets) {
+  if (!renderChanged('cacheStats', [cacheStats, buckets])) return;
   if (!cacheStats) return;
   const rate = cacheStats.overall || 0;
   const pct = (rate * 100).toFixed(1);
@@ -179,6 +199,7 @@ function renderCacheStats(cacheStats, buckets) {
 
 // ---------- 按模型缓存率 ----------
 function renderCacheByModel(cacheStats) {
+  if (!renderChanged('cacheByModel', cacheStats ? cacheStats.byModel : null)) return;
   const container = document.getElementById('cacheByModel');
   const list = cacheStats?.byModel || [];
   if (list.length === 0) {
@@ -199,6 +220,7 @@ function renderCacheByModel(cacheStats) {
 
 // ---------- 模型成本对比 ----------
 function renderModelCompare(byModel) {
+  if (!renderChanged('modelCompare', { m: byModel, v: modelMetric })) return;
   const container = document.getElementById('modelCompare');
   if (!byModel || byModel.length === 0) {
     container.innerHTML = '<div class="empty">暂无模型数据</div>';
@@ -250,8 +272,15 @@ function renderModelCompare(byModel) {
   }
 }
 
-// ---------- 会话级明细 ----------
-function renderSessions(bySession) {
+// ---------- 会话级明细（滚动到底自动加载更多，最多展示近一个月）----------
+const SESSION_PAGE = 30;        // 每批渲染条数
+const SESSION_MONTH_DAYS = 30;  // 明细最多覆盖的天数
+let _sessData = [];             // 近一个月内、按 lastActive 降序的全部会话
+let _sessMaxTotal = 1;          // 进度条百分比基准（一个月范围内的最大值）
+let _sessRendered = 0;          // 已渲染条数
+let _sessObserver = null;       // 底部 sentinel 的 IntersectionObserver
+
+function renderSessions(bySession, opts = {}) {
   const container = document.getElementById('sessionList');
   const hint = document.getElementById('sessionHint');
   if (!bySession || bySession.length === 0) {
@@ -259,33 +288,120 @@ function renderSessions(bySession) {
     if (hint) hint.textContent = '';
     return;
   }
-  if (hint) hint.textContent = `共 ${bySession.length} 个会话`;
-  const maxTotal = Math.max(...bySession.map((s) => s.total), 1);
-  container.innerHTML = bySession.slice(0, 30).map((s) => {
-    const pct = (s.total / maxTotal) * 100;
-    const modelTxt = s.model ? `<span class="sess-model">${escapeHtml(shortModel(s.model))}</span>` : '';
-    return `
-      <div class="sess-row" data-sid="${escapeHtml(s.sessionId)}">
-        <div class="sess-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title.slice(0, 40))}</div>
-        <div class="sess-meta">
-          ${modelTxt}
-          <span class="sess-time">${fmtTime(s.lastActive)}</span>
-          <span class="sess-count">${s.count} 次</span>
-        </div>
-        <div class="sess-bar"><div class="sess-fill" style="width:${pct}%"></div></div>
-        <div class="sess-stats">
-          <span class="tok in">↓${fmt(s.input)}</span>
-          <span class="tok out">↑${fmt(s.output)}</span>
-          <span class="tok total">Σ${fmt(s.total)}</span>
-          ${cacheRateChip(s.input, s.cached)}
-          ${s.credits > 0 ? `<span class="tok credits">◈${s.credits.toFixed(2)}</span>` : ''}
-        </div>
-      </div>`;
-  }).join('');
+
+  const oneMonthAgo = Date.now() - SESSION_MONTH_DAYS * 24 * 60 * 60 * 1000;
+  const nextData = bySession.filter((s) => (s.lastActive || 0) >= oneMonthAgo);
+  const maxTotal = nextData.reduce((m, s) => Math.max(m, s.total), 1);
+
+  // 定时刷新（preserve）且已经渲染过分页：保留已加载的分页与 DOM，
+  // 避免 renderSummary 每 5 秒重渲染把已滚动加载的内容清空 / 造成闪烁
+  if (opts.preserve && _sessData.length > 0 && container.querySelector('.sess-row')) {
+    _sessData = nextData;
+    _sessMaxTotal = maxTotal;
+    if (hint) {
+      hint.textContent = _sessData.length === bySession.length
+        ? `共 ${_sessData.length} 个会话（近一个月）`
+        : `近一个月 ${_sessData.length} 个会话（全部 ${bySession.length} 个）`;
+    }
+    updateSessionSentinel();
+    return;
+  }
+
+  // 首次 / 硬渲染：重建（重置分页）
+  _sessData = nextData;
+  _sessMaxTotal = maxTotal;
+  _sessRendered = 0;
+
+  // 清理旧 observer，避免监听残留
+  if (_sessObserver) { _sessObserver.disconnect(); _sessObserver = null; }
+
+  if (hint) {
+    hint.textContent = _sessData.length === bySession.length
+      ? `共 ${_sessData.length} 个会话（近一个月）`
+      : `近一个月 ${_sessData.length} 个会话（全部 ${bySession.length} 个）`;
+  }
+
+  // 近一个月内无任何会话
+  if (_sessData.length === 0) {
+    container.innerHTML = '<div class="empty">最近一个月内暂无会话数据</div>';
+    return;
+  }
+
+  // 重建容器 + 底部 sentinel（用于无限滚动）
+  container.innerHTML = '';
+  const sentinel = document.createElement('div');
+  sentinel.id = 'sessionSentinel';
+  sentinel.className = 'sess-sentinel';
+  container.appendChild(sentinel);
+
+  setupSessionObserver(sentinel);
+  renderSessionChunk(); // 渲染首批
+}
+
+function buildSessRow(s) {
+  const pct = (_sessMaxTotal ? (s.total / _sessMaxTotal) * 100 : 0);
+  const modelTxt = s.model ? `<span class="sess-model">${escapeHtml(shortModel(s.model))}</span>` : '';
+  return `
+    <div class="sess-row" data-sid="${escapeHtml(s.sessionId)}">
+      <div class="sess-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title.slice(0, 40))}</div>
+      <div class="sess-meta">
+        ${modelTxt}
+        <span class="sess-time">${fmtTime(s.lastActive)}</span>
+        <span class="sess-count">${s.count} 次</span>
+      </div>
+      <div class="sess-bar"><div class="sess-fill" style="width:${pct}%"></div></div>
+      <div class="sess-stats">
+        <span class="tok in">↓${fmt(s.input)}</span>
+        <span class="tok out">↑${fmt(s.output)}</span>
+        <span class="tok total">Σ${fmt(s.total)}</span>
+        ${cacheRateChip(s.input, s.cached)}
+        ${s.credits > 0 ? `<span class="tok credits">◈${s.credits.toFixed(2)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+// 追加下一批会话行（插入到 sentinel 之前）
+function renderSessionChunk() {
+  const container = document.getElementById('sessionList');
+  const sentinel = document.getElementById('sessionSentinel');
+  if (!container || !sentinel) return;
+  const next = _sessData.slice(_sessRendered, _sessRendered + SESSION_PAGE);
+  if (next.length === 0) { updateSessionSentinel(); return; }
+  sentinel.insertAdjacentHTML('beforebegin', next.map(buildSessRow).join(''));
+  _sessRendered += next.length;
+  updateSessionSentinel();
+}
+
+function updateSessionSentinel() {
+  const sentinel = document.getElementById('sessionSentinel');
+  if (!sentinel) return;
+  if (_sessRendered >= _sessData.length) {
+    sentinel.textContent = '已加载最近一个月全部会话明细';
+    sentinel.classList.add('done');
+    if (_sessObserver) _sessObserver.disconnect();
+  } else {
+    sentinel.textContent = '滚动加载更多…';
+    sentinel.classList.remove('done');
+    if (_sessObserver) _sessObserver.observe(sentinel);
+  }
+}
+
+function setupSessionObserver(sentinel) {
+  if (_sessObserver) _sessObserver.disconnect();
+  _sessObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        // 下一帧再渲染，避免与本轮 DOM 变更同步重入
+        requestAnimationFrame(() => renderSessionChunk());
+      }
+    }
+  }, { root: null, rootMargin: '120px', threshold: 0 });
+  _sessObserver.observe(sentinel);
 }
 
 // ---------- 用量预测 ----------
 function renderPrediction(pred) {
+  if (!renderChanged('prediction', pred)) return;
   const detail = document.getElementById('predictDetail');
   if (!pred.available) {
     document.getElementById('todayUsed').textContent = '—';
@@ -328,6 +444,7 @@ function renderPrediction(pred) {
 
 // ---------- 预警检查 ----------
 async function renderAlert(alertResult) {
+  if (!renderChanged('alert', alertResult)) return;
   const banner = document.getElementById('alertBanner');
   const textEl = document.getElementById('alertText');
 
@@ -343,6 +460,7 @@ async function renderAlert(alertResult) {
 
 // ---------- 周期对比 ----------
 function renderComparison(comp) {
+  if (!renderChanged('comparison', comp)) return;
   const grid = document.getElementById('compareGrid');
   const hint = document.getElementById('compareHint');
   if (!comp || !comp.ranges || comp.ranges.length === 0) {
@@ -435,6 +553,7 @@ function shortUrl(url) {
 }
 
 function renderRecords(records) {
+  if (!renderChanged('records', records)) return;
   const container = document.getElementById('records');
   if (!records || records.length === 0) {
     container.innerHTML = '<div class="empty">暂无记录，打开 work.trae.cn 开始对话即可采集</div>';
