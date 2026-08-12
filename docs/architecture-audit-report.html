@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>trae-token-watcher 架构审计报告</title>
+<title>trae-token-watcher 架构审计报告 v2（2026-08-13）</title>
 <style>
   :root {
     --bg: #faf9f6;
@@ -28,889 +28,364 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.7;
-    font-size: 14px;
-    padding: 2rem 1rem;
+    background: var(--bg); color: var(--text); line-height: 1.7;
+    font-size: 14px; padding: 2rem 1rem;
   }
-  .container { max-width: 960px; margin: 0 auto; }
+  .container { max-width: 1000px; margin: 0 auto; }
   h1 { font-size: 24px; font-weight: 600; margin-bottom: 4px; }
   h2 { font-size: 18px; font-weight: 600; margin: 2rem 0 0.75rem; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
   h3 { font-size: 15px; font-weight: 600; margin: 1.25rem 0 0.5rem; }
-  .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 2rem; }
-  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 1rem 0 2rem; }
-  .summary-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    text-align: center;
+  .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 1.5rem; }
+  .callout {
+    background: var(--blue-bg); border: 1px solid #b0d0ee; border-left: 4px solid var(--blue);
+    border-radius: 6px; padding: 12px 16px; margin: 1rem 0 1.5rem; font-size: 13px;
   }
+  .callout b { color: var(--blue); }
+  summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 1rem 0 1.5rem; }
+  .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
   .summary-card .num { font-size: 28px; font-weight: 700; line-height: 1.2; }
   .summary-card .label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-  .summary-card .p0 { color: var(--red); }
-  .summary-card .p1 { color: var(--amber); }
-  .summary-card .p2 { color: var(--blue); }
-  .summary-card .p3 { color: var(--text-muted); }
-
-  .issue {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 12px;
-    transition: border-color 0.2s;
-  }
-  .issue:hover { border-color: var(--text-light); }
-  .issue-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
+  .p0 { color: var(--red); } .p1 { color: var(--amber); } .p2 { color: var(--blue); } .p3 { color: var(--text-muted); }
+  .issue { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 10px; }
+  .issue-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .badge-p0 { background: var(--red-bg); color: var(--red); border: 1px solid #f0c0c0; }
   .badge-p1 { background: var(--amber-bg); color: var(--amber); border: 1px solid #e8d090; }
   .badge-p2 { background: var(--blue-bg); color: var(--blue); border: 1px solid #b0d0ee; }
+  .badge-p3 { background: #f0eee8; color: var(--text-muted); border: 1px solid var(--border); }
   .badge-dim { background: #f0eee8; color: var(--text-muted); border: 1px solid var(--border); }
   .issue-title { font-size: 14px; font-weight: 600; }
   .issue-body { font-size: 13px; color: var(--text); }
-  .issue-body p { margin-bottom: 6px; }
-  .issue-body p:last-child { margin-bottom: 0; }
-  .issue-location {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-light);
-    background: #f5f3ed;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-  .fix {
-    margin-top: 8px;
-    padding: 8px 12px;
-    background: var(--green-bg);
-    border-left: 3px solid var(--green);
-    border-radius: 4px;
-    font-size: 13px;
-  }
+  .issue-body p { margin-bottom: 6px; } .issue-body p:last-child { margin-bottom: 0; }
+  .loc { font-family: var(--mono); font-size: 11px; color: var(--text-light); background: #f5f3ed; padding: 2px 6px; border-radius: 3px; }
+  .fix { margin-top: 8px; padding: 8px 12px; background: var(--green-bg); border-left: 3px solid var(--green); border-radius: 4px; font-size: 13px; }
   .fix-label { font-weight: 600; color: var(--green); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-  code {
-    font-family: var(--mono);
-    font-size: 12px;
-    background: #f0eee8;
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-  .toc {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 2rem;
-  }
-  .toc ul { list-style: none; }
-  .toc li { padding: 2px 0; }
-  .toc a { color: var(--blue); text-decoration: none; font-size: 13px; }
-  .toc a:hover { text-decoration: underline; }
-  .toc-count { color: var(--text-light); font-size: 12px; margin-left: 4px; }
-  .section { margin-bottom: 2.5rem; }
-  .section-intro { font-size: 13px; color: var(--text-muted); margin-bottom: 1rem; }
+  code { font-family: var(--mono); font-size: 12px; background: #f0eee8; padding: 1px 4px; border-radius: 3px; }
+  .fixed { background: var(--green-bg); border: 1px solid #bfe3d4; border-radius: 6px; padding: 12px 16px; margin: 1rem 0; }
+  .fixed h3 { margin-top: 0; color: var(--green); }
+  .fixed li { font-size: 13px; margin: 4px 0; list-style: none; padding-left: 22px; position: relative; }
+  .fixed li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
   th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
   th { font-weight: 600; color: var(--text-muted); font-size: 12px; }
-  .footer { text-align: center; color: var(--text-light); font-size: 12px; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  .footer { text-align: center; color: var(--text-light); font-size: 12px; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
 <div class="container">
 
-<h1>trae-token-watcher 架构审计报告</h1>
-<p class="subtitle">审计范围：extension/ + worker/ · 审计时间：2026-08-12 · 审计人：Karpathy (AI Architect)</p>
+<h1>trae-token-watcher 架构审计报告 v2</h1>
+<p class="subtitle">审计范围：extension/ + worker/ · 审计时间：2026-08-13 · 审计人：Karpathy (AI Architect)</p>
 
-<div class="summary-grid">
-  <div class="summary-card"><div class="num p0">3</div><div class="label">P0 严重</div></div>
-  <div class="summary-card"><div class="num p1">14</div><div class="label">P1 高危</div></div>
-  <div class="summary-card"><div class="num p2">19</div><div class="label">P2 中危</div></div>
-  <div class="summary-card"><div class="num p3">5</div><div class="label">P3 建议</div></div>
+<div class="callout">
+  <b>重要说明：</b>仓库内已有的 <code>docs/architecture-audit-report.html</code>（标注 2026-08-12）已<b>严重过时</b>。本次对照当前源码逐条复核，发现当时标为 P0/P1 的多项问题<b>实际已经修复</b>（见文末「已修复清单」），且现有报告遗漏了若干新问题（隐私承诺与云端同步的张力、Star 回查的 GitHub 限流雷区等）。本报告为<b>当前代码的真实状态</b>。
 </div>
 
-<div class="toc">
+<div class="summary-grid">
+  <div class="summary-card"><div class="num p0">0</div><div class="label">P0 严重</div></div>
+  <div class="summary-card"><div class="num p1">0</div><div class="label">P1 高危（本轮已修复）</div></div>
+  <div class="summary-card"><div class="num p2">8</div><div class="label">P2 中危</div></div>
+  <div class="summary-card"><div class="num p3">9</div><div class="label">P3 建议</div></div>
+</div>
+
+<div class="fixed">
+  <h3>✓ 相对 8-12 报告，已确认修复的问题（代码已 hardening）</h3>
   <ul>
-    <li><a href="#security">一、安全 (Security)</a><span class="toc-count">— 9 个问题</span></li>
-    <li><a href="#performance">二、性能 (Performance)</a><span class="toc-count">— 9 个问题</span></li>
-    <li><a href="#stability">三、稳定性 (Stability)</a><span class="toc-count">— 8 个问题</span></li>
-    <li><a href="#reliability">四、可靠性 (Reliability)</a><span class="toc-count">— 10 个问题</span></li>
-    <li><a href="#quality">五、代码质量 (Code Quality)</a><span class="toc-count">— 5 个建议</span></li>
-    <li><a href="#priority">六、优化优先级排序</a></li>
+    <li><b>CORS 通配符 <code>*</code></b> → 已改为 <code>chrome-extension://</code> + <code>ALLOWED_ORIGINS</code> 白名单（worker/src/index.js <code>resolveCorsOrigin</code>）</li>
+    <li><b>OAuth state 无签名</b> → 已用 <code>HMAC-SHA256</code> 签名 + 常量时间比较（worker/src/auth.js <code>signState</code> / <code>timingSafeEqual</code>）</li>
+    <li><b>IndexedDB 每次操作 open/close</b> → 已用单例连接 <code>_dbPromise</code>（extension/lib/db.js）</li>
+    <li><b>refreshBadge 全量 getAll</b> → 已改用 <code>countRecordsSince</code>（background.js）</li>
+    <li><b>handleUsage 猴补丁</b> → 已内联 <code>runAlertCheck()</code>（background.js）</li>
+    <li><b>sync push 负数积分</b> → <code>flo()</code> 已改为 <code>Math.max(0, n)</code>（worker/src/sync.js）</li>
+    <li><b>诊断无超时/重试</b> → 已加 15s 超时 + 2 次有限重试（worker/src/diagnose.js）</li>
   </ul>
 </div>
 
-<div class="section" id="security">
-<h2>一、安全 (Security) — 9 个问题</h2>
-<p class="section-intro">后端 CORS 全放行、OAuth state 无签名、session token 暴露在 URL 中、加密密钥派生方式薄弱。</p>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p0">P0</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">CORS 配置为通配符 `*`，允许任意来源携带凭证访问 API</span>
-    <span class="issue-location">worker/src/index.js:103</span>
-  </div>
-  <div class="issue-body">
-    <p><code>Access-Control-Allow-Origin: '*'</code> 允许任何网站发起跨域请求。虽然 API 需要 Authorization Bearer token 认证，但恶意网站可以通过钓鱼页面诱导用户访问，利用浏览器中已存储的 session token 发起跨域请求。</p>
-    <p>更危险的是：如果用户在浏览器中打开了恶意页面，该页面可以通过 fetch 携带用户的 token（如果存在 localStorage 或 cookie 中）向 Worker API 发起请求，读取或删除用户数据。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    将 CORS origin 限制为 <code>chrome-extension://&lt;extension_id&gt;</code> 和 <code>https://trae-token-watcher-api.ai-kits.workers.dev</code>。从请求头 <code>Origin</code> 中读取来源，与白名单比对后动态返回。
-  </div>
+<div class="fixed">
+  <h3>✓ 本轮（2026-08-13）新修复的问题</h3>
+  <ul>
+    <li><b>P1-1 性能</b>：<code>getSummary()</code> 不再 <code>getAllRecords(2000)</code> 全量加载，改为 <code>getRecordsSince(近30天)</code> 的 timestamp 索引范围查询；popup 改为监听 background 发布的 <code>ttw_usage_ping</code> 事件驱动刷新 + 15s 兜底轮询，并加渲染并发守卫（extension/lib/db.js · popup.js · background.js）</li>
+    <li><b>P1-2 性能</b>：fetch 拦截器新增 4MB 体积护盾，<code>content-length</code> 超限则跳过 <code>clone().text()</code> 全量解析，避免大响应阻塞主线程（extension/content/inject.js）</li>
+    <li><b>P1-3 可靠性</b>：彻底移除 <code>checkStarredPublic</code> 未认证 stargazers 兜底（60 次/小时 IP 限流 + Worker 共享出口 IP 的雷区），回查统一走 <code>checkStarred</code> 精确端点，无 token 且无缓存时降级而非误判（worker/src/github.js · worker/src/auth.js）</li>
+    <li><b>P1-4 可靠性</b>：Snowflake 时间反推加运行时偏差自检——用权威 <code>chat_sessions.created_at</code> 与反推值持续对比，偏差超阈值自动禁用反推并降级到采集时刻，避免 TRAE 改 ID 策略时静默误归因（extension/content/inject.js）</li>
+    <li><b>P2-1 文档</b>：README 第 137 行「加密存入 chrome.storage.local」虚假承诺已删除，改为如实说明「由当前系统用户 Profile 加密保护」；Key 真正加密存储属产品决策，待后续排期（README.md）</li>
+    <li><b>P2-3 文档</b>：README「隐私优先 / 不上传」承诺已校正——明确默认本地优先、开启云端同步后会上传（含提问预览与来源 URL），区分"本地优先"与"可选云同步"（README.md）</li>
+  </ul>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p0">P0</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">OAuth state 参数仅 base64 编码，无密码学签名，CSRF 防护形同虚设</span>
-    <span class="issue-location">worker/src/auth.js:17-24</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p0">结论</span><span class="issue-title">整体评价</span></div>
   <div class="issue-body">
-    <p><code>state = btoa(JSON.stringify({extId, nonce}))</code> — nonce 虽然是随机 UUID，但从未存储在服务端，回调时也<strong>未验证 nonce</strong>。攻击者只需 base64 编码一个 JSON 对象即可伪造合法的 state 参数。</p>
-    <p>这意味着攻击者可以构造一个伪造的 GitHub OAuth 回调 URL，诱导用户访问，将攻击者的 GitHub 账号绑定到用户的扩展 session 上（账户劫持）。</p>
+    <p>后端（worker）工程质量较高：CORS、OAuth、加密、超时重试均已按最佳实践落地，无明显 P0 风险。问题主要集中在<b>扩展端性能热点</b>与<b>少量残留的安全/可靠性隐患</b>。当前<b>没有 P0 阻塞项</b>，4 个 P1 建议在下一个版本排入。</p>
   </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 在 KV 中存储 <code>state → {extId, createdAt}</code>，TTL 5 分钟；<br>
-    2. 回调时验证 state 存在且未过期，用后即焚；<br>
-    3. 或用 HMAC-SHA256 对 state 签名（密钥用 SESSION_SECRET），回调时验签。
+</div>
+
+<!-- ===================== 安全 ===================== -->
+<h2>一、安全 (Security) — 当前 6 个问题</h2>
+
+<div class="issue">
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">安全</span>
+    <span class="issue-title">DeepSeek API Key 明文存储，且 README 虚假承诺「加密」（README 已修正）</span><span class="loc">options.js:131 · popup.js:632</span></div>
+  <div class="issue-body">
+    <p>设置页 <code>saveApiKey</code> 直接 <code>chrome.storage.local.set({ ttw_deepseek_key: key })</code>，无任何加密；popup 用 <code>Bearer ${key}</code> 直连 DeepSeek。而 README 第 137 行写「（加密存入 chrome.storage.local）」——<b>代码与文档不符</b>。任何能访问浏览器 profile 的程序/扩展可读出该 Key。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 至少做 XOR+base64 混淆，或优先用 <code>chrome.storage.session</code>（内存级，关浏览器即失效）；② 修正 README，删除「加密」措辞，改为如实说明存储方式。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">Session token 通过 URL query 参数传递，存在泄露风险</span>
-    <span class="issue-location">worker/src/auth.js:89-96</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">安全</span>
+    <span class="issue-title">Session token 仍在 URL query 中传递</span><span class="loc">worker/src/auth.js:124-132</span></div>
   <div class="issue-body">
-    <p>OAuth 完成后，Worker 302 重定向到 <code>/auth/done?token=xxx&expires=xxx</code>。token 出现在 URL query 中，可能被以下途径泄露：</p>
-    <p>1. Cloudflare Workers 的访问日志（如果开启了 observability）<br>
-    2. 浏览器历史记录<br>
-    3. Referer 头（如果 /auth/done 页面加载了外部资源）</p>
-    <p>代码注释说"chrome.tabs API 看不到 fragment"，这是正确的，但可以用 <code>chrome.webNavigation</code> API 或在 /auth/done 页面中注入 content script 来读取 fragment。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    方案 A：将 token 放在 fragment (<code>#token=xxx</code>) 中，在 /auth/done 页面注入一段 JS 读取 fragment 并通过 <code>chrome.runtime.sendMessage</code> 发给扩展。<br>
-    方案 B：用短期一次性 code（5 秒过期）替代 token，扩展用 code 换 token（类似 PKCE 流程）。
+    <p>OAuth 完成后 Worker 302 到 <code>/auth/done?token=xxx&amp;expires=xxx</code>。背景页通过 <code>chrome.tabs.onUpdated</code> 捕获后立刻关页，但 token 仍会：① 进入浏览器历史；② <b>被 Cloudflare 访问日志捕获</b>——<code>wrangler.toml</code> 已开启 <code>observability</code>（10% 采样），日志含完整 request URL，token 有概率落入 Cloudflare 侧日志。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>改用 fragment（<code>#token=xxx</code>）或在 <code>/auth/done</code> 注入 content script 读 fragment 后 <code>chrome.runtime.sendMessage</code>；更稳妥是用 5 秒一次性 code 换 token（类 PKCE）。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">AES 密钥派生方式薄弱，直接用 SHA-256(secret) 作为 AES key</span>
-    <span class="issue-location">worker/src/github.js:101-103</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">安全/隐私</span>
+    <span class="issue-title">「隐私优先 / 不上传」承诺与云端同步行为存在张力（README 已修正）</span><span class="loc">worker/schema.sql:47-69 · README L5/L36</span></div>
   <div class="issue-body">
-    <p><code>deriveAesKey()</code> 直接对 SESSION_SECRET 做 SHA-256 得到 AES-256 key。这是非标准的密钥派生方式，缺乏：</p>
-    <p>1. 盐值（salt）— 相同 secret 永远派生出相同 key<br>
-    2. 迭代次数 — 无计算成本，暴力破解容易<br>
-    3. 密钥分离 — session 签名和 token 加密用同一个 secret，一旦泄露两道防线同时崩溃</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    使用 HKDF 或 PBKDF2：<code>crypto.subtle.deriveKey({name:'HKDF', hash:'SHA-256', salt, info:'github-token-enc'}, ...)</code>。为不同用途（session 签名 vs token 加密）使用不同的 <code>info</code> 参数实现密钥分离。
+    <p>README 首页与第四节反复强调「数据只存本地、不上传任何第三方、隐私优先」。但开启云同步时，<code>usage_records</code> 同步表会把 <code>user_input_preview</code>（<b>用户提问预览</b>）和 <code>url</code> 一并上传到服务器（extension/lib/sync.js:74 / worker/src/sync.js）。这与隐私卖点矛盾，且用户无明确告知「提问内容将离开本机」。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 同步开关旁明确列出将上传的字段（含提问预览），让用户知情同意；② 提供「同步时脱敏 user_input_preview」选项；③ 文案区分「本地优先（默认零上传）」与「可选云同步（会上传用量+提问预览）」。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">postMessage 使用通配符 `*` 作为 targetOrigin</span>
-    <span class="issue-location">extension/content/inject.js:104</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">安全</span>
+    <span class="issue-title">AES 密钥派生无盐、无迭代，且签名/加密同源</span><span class="loc">worker/src/github.js:101-104</span></div>
   <div class="issue-body">
-    <p><code>window.postMessage({...}, '*')</code> 允许页面上任何脚本（包括第三方注入的）接收消息。虽然 payload 不含敏感信息（token 用量数据），但在某些场景下可能泄露用户的使用习惯。</p>
-    <p>同样，content.js 中 <code>window.postMessage({...}, '*')</code> 也是通配符。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    inject.js 中改为 <code>window.postMessage({...}, location.origin)</code>；content.js 中同理。或定义自定义 targetOrigin 常量。
+    <p><code>deriveAesKey</code> 仍直接 <code>SHA-256(SESSION_SECRET)</code> 作 AES-GCM key。已用 AES-GCM + 随机 IV（良好），但缺盐、缺迭代、且 session 签名与 token 加密都源自同一 secret，无密钥分离。暴力破解成本偏低。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>改用 <code>HKDF-SHA256</code>，用不同 <code>info</code> 参数分别派生「session 签名密钥」与「token 加密密钥」。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">sync push 接口无速率限制，可被滥用进行数据注入</span>
-    <span class="issue-location">worker/src/sync.js:12-70</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">安全</span>
+    <span class="issue-title">postMessage 使用通配符 <code>*</code> 作为 targetOrigin</span><span class="loc">inject.js:104 · content.js:38</span></div>
   <div class="issue-body">
-    <p><code>/api/sync/push</code> 接受 500 条/请求，无任何速率限制。一个有效的 session token 可以在短时间内推送大量垃圾数据到 D1 数据库，导致：</p>
-    <p>1. D1 存储配额耗尽（免费版 5GB）<br>
-    2. 正常用户的 pull 操作被垃圾数据淹没<br>
-    3. D1 写入配额耗尽（免费版每天有限额）</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 用 KV 实现简单的速率限制：每用户每小时最多 N 条记录<br>
-    2. 或用 D1 的 <code>usage_quota</code> 表扩展为 sync 配额<br>
-    3. 对单条记录做更严格的字段验证（ts 范围、token 数量上限等）
+    <p>主世界 → 隔离世界 的 usage 消息用 <code>postMessage(..., '*')</code>。载荷虽不含密钥，但含完整用量习惯数据，可被同页任意脚本接收。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>改为 <code>window.postMessage(payload, location.origin)</code>。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">DeepSeek API Key 明文存储在 chrome.storage.local</span>
-    <span class="issue-location">extension/popup/popup.js:505</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">安全</span>
+    <span class="issue-title">Cloud-IDE-JWT 持久化到页面 localStorage</span><span class="loc">inject.js:974-1005</span></div>
   <div class="issue-body">
-    <p>用户的 DeepSeek API Key 以明文存储在 <code>chrome.storage.local</code>。虽然扩展的 storage 有一定隔离性，但任何能访问浏览器 profile 目录的程序或扩展都可以读取。</p>
+    <p>为重放批量拉取，<code>saveBulkAuth</code> 把 trae.cn 的 <code>Cloud-IDE-JWT</code> 存进 <code>__ttw_bulk_auth__</code>（trae.cn 域 localStorage）。同域任意脚本（含 XSS）可读。建议仅内存保存。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>JWT 仅保留在内存变量 <code>latestAuthToken</code>，不写 localStorage；或写入 <code>chrome.storage.session</code>。</div>
   </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    至少做一层简单的混淆（XOR + base64），或使用 <code>chrome.storage.session</code>（内存级，浏览器关闭即丢失）。更好的方案是提醒用户用完即删。
+</div>
+
+<!-- ===================== 性能 ===================== -->
+<h2>二、性能 (Performance) — 当前 6 个问题</h2>
+
+<div class="issue">
+  <div class="issue-header"><span class="badge badge-p1">P1</span><span class="badge badge-dim">已修复</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">Popup 每 5s 全量加载 2000 条记录 + 多遍遍历（已修复）</span><span class="loc">popup.js:1170 · db.js:186</span></div>
+  <div class="issue-body">
+    <p><code>setInterval(renderSummary, 5000)</code> 每次都执行：<code>getSummary()</code> → <code>getAllRecords(2000)</code> 后做 4 遍聚合；<code>getComparison()</code> → <code>getRecordsSince(now-61天)</code>；<code>predictUsage()</code>（60s 缓存，已缓解）。<code>renderChanged</code> 只减少了 DOM 重建，但 <b>IndexedDB 全量加载与聚合每 5s 仍照常执行</b>。重度用户 2000 条 × 多次遍历，popup 打开期间持续占用主线程。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 用 <code>timestamp</code> 索引做范围查询替代全量 <code>getAll</code>；② 汇总结果缓存，仅在有新记录写入时失效（监听 <code>chrome.storage.onChanged</code> 或 background 主动消息）；③ 改为事件驱动刷新，而非固定 5s 轮询；④ <code>getComparison</code> 拆成 3 个独立 <code>IDBKeyRange</code> 查询。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">sync push 的 flo() 函数允许负数积分/费用写入</span>
-    <span class="issue-location">worker/src/sync.js:207</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p1">P1</span><span class="badge badge-dim">已修复</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">fetch/XHR 拦截器对每个匹配响应 clone().text() 读全量响应体（已修复）</span><span class="loc">inject.js:700 · 781</span></div>
   <div class="issue-body">
-    <p><code>function flo(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }</code> — 不检查负数。攻击者可以推送 <code>credits: -99999</code> 的记录，虽然目前没有直接影响（数据仅用于展示），但可能误导统计或用于未来功能。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    改为 <code>return Number.isFinite(n) ? Math.max(0, n) : 0;</code>
+    <p>对每个命中 <code>shouldIntercept()</code> 的响应都 <code>response.clone().text()</code> 读完整 body，再 <code>JSON.parse</code>。会话列表、代码补全等大响应（可达数 MB）会：① 内存翻倍（clone + text）；② 主线程 parse 阻塞页面；③ SSE 响应会等完整 body。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 先读 <code>Content-Length</code>/<code>content-type</code>，超阈值（如 100KB）跳过 body 解析；② SSE 用 <code>ReadableStream</code> 逐块解析，不等完整 body；③ 用 <code>response.json()</code> 替代 <code>text()+JSON.parse</code>。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">安全</span>
-    <span class="issue-title">诊断接口错误信息暴露 DeepSeek API 原始响应</span>
-    <span class="issue-location">worker/src/diagnose.js:96</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">getComparison 加载近 61 天全量记录</span><span class="loc">db.js:533</span></div>
   <div class="issue-body">
-    <p><code>throw httpError(502, 'DeepSeek API 错误 ${resp.status}: ${errText.slice(0, 200)}')</code> — 将 DeepSeek 的原始错误响应（可能包含 API key 片段、内部错误信息）返回给客户端。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    客户端只返回通用错误信息（"诊断服务暂时不可用"），原始错误仅记录在服务端日志中。
-  </div>
-</div>
-
-</div>
-
-<div class="section" id="performance">
-<h2>二、性能 (Performance) — 9 个问题</h2>
-<p class="section-intro">IndexedDB 连接管理、全量数据加载、定时器频率、响应体克隆是主要性能瓶颈。</p>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p0">P0</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">IndexedDB 每次操作都重新打开和关闭连接，严重浪费性能</span>
-    <span class="issue-location">extension/lib/db.js:9-58</span>
-  </div>
-  <div class="issue-body">
-    <p>每个 <code>addRecord()</code>、<code>getRecordsSince()</code>、<code>getAllRecords()</code> 等函数都调用 <code>openDB()</code> 创建新连接，并在 <code>tx.oncomplete</code> 中关闭。这意味着：</p>
-    <p>1. 每次操作都有 IDB 打开/关闭开销（约 5-20ms）<br>
-    2. 多个并发操作会各自打开连接，可能触发 <code>onupgradeneeded</code> 冲突<br>
-    3. 在 background.js 中，每次写入用量记录 + refreshBadge + checkAlert 会触发至少 3 次 DB 开关</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    使用单例模式：<code>let dbPromise = null; function getDB() { if (!dbPromise) dbPromise = openDB(); return dbPromise; }</code>。所有函数复用同一个 Promise。注意处理 <code>onversionchange</code> 事件。
+    <p>仅为计算「今日 vs 昨日 / 本周 vs 上周 / 本月 vs 上月」就加载 61 天记录（可能数千条）。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>用 3 个独立 <code>IDBKeyRange</code> 范围查询分别取各周期，或用 cursor 边遍历边累加。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">getSummary() 加载全部 2000 条记录到内存并多次遍历</span>
-    <span class="issue-location">extension/lib/db.js:161-273</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">debug 在非调试态仍执行 <code>slice(0,2000)</code></span><span class="loc">inject.js:703</span></div>
   <div class="issue-body">
-    <p><code>getAllRecords(2000)</code> 一次性加载 2000 条记录，然后对同一数组进行 4 次遍历：</p>
-    <p>1. buckets 汇总（today/week/month/all）<br>
-    2. trend 按天聚合<br>
-    3. byModel 按模型聚合<br>
-    4. bySession 按会话聚合</p>
-    <p>对于使用频繁的用户，2000 条记录每条含 url、userInputPreview 等长字符串字段，可能占用数 MB 内存。这个函数每 5 秒被调用一次（popup 打开期间）。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 单次遍历完成所有聚合（reduce 模式）<br>
-    2. 在 IndexedDB 层面用 cursor + 索引做范围查询，避免全量加载<br>
-    3. 缓存 summary 结果，仅在新记录到达时失效<br>
-    4. popup 的 5 秒刷新改为事件驱动（storage change 监听）
+    <p><code>pushDebug({ bodyPreview: text.slice(0, 2000) })</code> 的 slice 总是执行，即使 <code>DEBUG=false</code>（<code>pushDebug</code> 内部直接 return）。大响应体下 slice 仍有开销。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>调用前先 <code>if (DEBUG)</code> 判断，或改惰性求值。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">refreshBadge() 每次写入都全量查询今日所有记录</span>
-    <span class="issue-location">extension/background/background.js:161-178</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">浮窗 mousemove 监听在 removeWidget 后未解绑</span><span class="loc">content.js:351-371 / 374</span></div>
   <div class="issue-body">
-    <p>每写入一条用量记录就调用 <code>refreshBadge()</code>，内部调用 <code>getRecordsSince(startOfDay(Date.now()))</code> 加载今日全部记录，仅为获取 <code>count</code>。如果今天有 200 次请求，第 200 次写入时仍会加载全部 200 条记录。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 用 IndexedDB <code>store.count()</code> 替代 <code>getAll()</code>，只获取数量不加载完整记录<br>
-    2. 或维护内存计数器，写入时 +1，无需查询
+    <p><code>document.addEventListener('mousemove', ...)</code> 在 <code>bindWidgetEvents</code> 中注册一次，<code>removeWidget()</code> 未移除。关闭浮窗后，页面每次鼠标移动仍触发该回调（仅 early-return）。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>仅在 <code>mousedown</code> 时注册 <code>mousemove</code>，<code>mouseup</code> 后移除；或在 <code>removeWidget</code> 中移除所有监听。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">fetch 拦截器对每个匹配响应都 clone 并读取完整文本</span>
-    <span class="issue-location">extension/content/inject.js:677-684</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">性能</span>
+    <span class="issue-title">内存 Map 仅按 size 阈值清理，非定时</span><span class="loc">inject.js:109 / 592</span></div>
   <div class="issue-body">
-    <p>对每个匹配 <code>shouldIntercept()</code> 的 fetch 响应，代码调用 <code>response.clone().text()</code> 读取完整响应体。对于大型 JSON 响应（如会话列表、代码补全结果），这可能达到数 MB，导致：</p>
-    <p>1. 内存翻倍（clone + text）<br>
-    2. JSON.parse 在主线程执行，阻塞页面<br>
-    3. SSE 响应可能持续增长，text() 等待完成</p>
+    <p><code>ctxCache</code>（60s TTL）、<code>seenRequests</code>（3s 窗口）只在 size 超阈值时清理过期项；增长缓慢时过期项不被及时释放。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>用 <code>setInterval</code> 定时清理（每 30s）。</div>
   </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 对 SSE/EventSource 响应用 ReadableStream 逐块解析，不等完整 body<br>
-    2. 对 JSON 响应先检查 Content-Length，超阈值（如 100KB）跳过<br>
-    3. 用 <code>response.json()</code> 替代 <code>text() + JSON.parse</code>，减少一次拷贝
+</div>
+
+<!-- ===================== 稳定性 ===================== -->
+<h2>三、稳定性 (Stability) — 当前 5 个问题</h2>
+
+<div class="issue">
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">稳定性</span>
+    <span class="issue-title">EventSource onmessage 拦截只存引用不注册，页面收不到消息</span><span class="loc">inject.js:852-859</span></div>
+  <div class="issue-body">
+    <p>对 trae/LLM 域 EventSource，<code>Object.defineProperty(es,'onmessage',{set:(fn)=>{_onmsg=fn}})</code> 仅保存引用，<b>未把 fn 注册到 EventSource</b>。若页面用 <code>es.onmessage = fn</code> 设置监听，该 fn 不会被调用——页面在拦截域上的 SSE 功能会静默失效。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>在 setter 内同时 <code>origAdd('message', fn)</code>（注意去重），或在拦截前先桥接原有 onmessage。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">popup.js 每 5 秒全量刷新，包含 6+ 次 IndexedDB 查询</span>
-    <span class="issue-location">extension/popup/popup.js:1033</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">稳定性</span>
+    <span class="issue-title">MV3 Service Worker：syncTimer 用 setTimeout，SW 终止后丢失</span><span class="loc">background.js:114-122</span></div>
   <div class="issue-body">
-    <p><code>setInterval(renderSummary, 5000)</code> 触发：</p>
-    <p>1. <code>getSummary()</code> → <code>getAllRecords(2000)</code><br>
-    2. <code>getAllRecords(20)</code>（最近记录）<br>
-    3. <code>predictUsage()</code> → <code>getRecordsSince(now - 14*dayMs)</code><br>
-    4. <code>getComparison()</code> → <code>getRecordsSince(now - 61*dayMs)</code><br>
-    5. <code>checkAlert()</code> → 再次调用 <code>predictUsage()</code>（重复查询！）<br>
-    6. <code>getDiagnoses(50)</code></p>
-    <p>一次刷新至少 6-7 次 IDB 查询，且 <code>predictUsage</code> 被 <code>checkAlert</code> 重复调用。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 改为事件驱动：监听 background 的写入通知，仅在有新数据时刷新<br>
-    2. 合并 IDB 查询：一次 getAllRecords 满足所有计算<br>
-    3. 缓存 predictUsage 结果，checkAlert 复用而非重新查询<br>
-    4. Tab 切换时才渲染当前 tab 的数据，不渲染隐藏 tab
+    <p><code>syncTimer = setTimeout(...)</code> 为内存变量。SW 在 30s 无活动后被终止，debounce 同步不执行（虽有 10min <code>chrome.alarms</code> 兜底，但实时性差）。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>用 <code>chrome.alarms.create('ttw-sync-debounce', { delayInMinutes: 0.5 })</code> 替代 setTimeout，SW 重启后仍有效。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">getComparison() 加载 61 天全部记录用于 3 个时间范围对比</span>
-    <span class="issue-location">extension/lib/db.js:492-536</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">稳定性</span>
+    <span class="issue-title">WebSocket 直接替换构造函数 + prototype 共享</span><span class="loc">inject.js:870-902</span></div>
   <div class="issue-body">
-    <p>加载 61 天的记录（可能数千条），仅为计算今日 vs 昨日、本周 vs 上周、本月 vs 上月的对比。完全可以分范围查询。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    用 3 个独立的 <code>IDBKeyRange</code> 查询分别获取各范围记录，或用 cursor 边遍历边累加。
+    <p><code>window.WebSocket.prototype = OriginalWebSocket.prototype</code> 使 <code>instanceof</code> 与 <code>ws.constructor === WebSocket</code> 不可靠，可能破坏依赖这些判断的页面逻辑。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>用 <code>new Proxy(OriginalWebSocket, { construct(target, args){...} })</code> 包装，而非替换构造函数。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">内存中的 Map 清理策略依赖 size 阈值，非定时清理</span>
-    <span class="issue-location">extension/content/inject.js:109, 592</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">稳定性</span>
+    <span class="issue-title">IndexedDB v1→v2 迁移 cursor.update 无 onerror</span><span class="loc">db.js:36-47</span></div>
   <div class="issue-body">
-    <p><code>ctxCache</code>（60s TTL）只在 size > 50 时清理过期项。<code>seenRequests</code>（3s 窗口）只在 size > 200 时清理。如果 Map 增长缓慢（如每秒 1 条），过期项不会被及时清理，直到达到阈值。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    用 <code>setInterval</code> 定时清理（每 30 秒一次），或用 WeakRef + FinalizationRegistry。
+    <p>迁移时 <code>cursor.update(rec)</code> 没有 onerror 处理，单条失败（如配额超限）会静默跳过，部分旧记录回填 clientId 失败。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>为 <code>cursor.update</code> 加 onsuccess/onerror，迁移结束输出失败计数告警。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">content.js 浮窗拖拽时全局 mousemove 监听器未解绑</span>
-    <span class="issue-location">extension/content/content.js:310-326</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">稳定性</span>
+    <span class="issue-title">浮窗 refreshTimer 在 SPA 路由切换后无 MutationObserver 兜底</span><span class="loc">content.js:135</span></div>
   <div class="issue-body">
-    <p><code>document.addEventListener('mousemove', ...)</code> 在浮窗创建时注册，但 <code>removeWidget()</code> 时未移除。虽然回调内有 <code>if (!dragging) return</code>，但每帧仍会触发事件分发和回调执行，影响页面滚动和动画性能。</p>
+    <p>work.trae.cn 为 SPA，若路由切换把 widget host 从 DOM 移除，<code>refreshTimer</code> 仍会每 15s 向已失效的 shadow DOM 写数据，产生无效查询。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>用 MutationObserver 监测 host 是否仍在 document，移除则清理 timer 与状态。</div>
   </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在 mouseup 后移除 mousemove 监听器（只在拖拽时注册），或在 removeWidget 时移除所有监听器。
+</div>
+
+<!-- ===================== 可靠性 ===================== -->
+<h2>四、可靠性 (Reliability) — 当前 9 个问题</h2>
+
+<div class="issue">
+  <div class="issue-header"><span class="badge badge-p1">P1</span><span class="badge badge-dim">已修复</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">checkStarredPublic 用未认证 GitHub API 暴力翻 1000 stargazer，受 60 次/小时 IP 限流（已修复）</span><span class="loc">worker/src/github.js:77-97</span></div>
+  <div class="issue-body">
+    <p>老用户（登录时尚未持久化 access_token）触发 Star 回查时，<code>checkStarredPublic</code> 用<b>未认证</b> GitHub API 翻最多 10 页 × 100 = 1000 个 stargazer 逐页比对。未认证 GitHub API 限流为 <b>60 次/小时/出口 IP</b>，而 Cloudflare Worker <b>共享出口 IP</b>——多用户触发即迅速耗尽限额，返回 403 被当作「未 Star」，导致<b>已 Star 用户被误拒免费诊断</b>。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 登录流程强制持久化 access_token（已做主路径），彻底移除/弱化公开兜底；② 若保留兜底，对结果加服务端缓存并限制频率；③ 限流命中时返回「稍后重试」而非「未 Star」。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">性能</span>
-    <span class="issue-title">debug 日志在非调试模式下仍会计算 bodyPreview</span>
-    <span class="issue-location">extension/content/inject.js:680</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p1">P1</span><span class="badge badge-dim">已修复</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">Snowflake ID 时间反推是未契约的启发式假设（已修复）</span><span class="loc">inject.js:448-456</span></div>
   <div class="issue-body">
-    <p><code>pushDebug({bodyPreview: text.slice(0, 2000)})</code> — <code>text.slice(0, 2000)</code> 总是执行，即使 DEBUG 为 false（pushDebug 内部 return）。对于大响应体，slice 操作仍有开销。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在调用 pushDebug 前先检查 <code>if (DEBUG)</code>，或用惰性求值。
-  </div>
-</div>
-
-</div>
-
-<div class="section" id="stability">
-<h2>三、稳定性 (Stability) — 8 个问题</h2>
-<p class="section-intro">MV3 Service Worker 生命周期管理是最突出的稳定性风险，其次是代码级别的猴补丁和竞态条件。</p>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">Service Worker 生命周期导致 OAuth 回调状态丢失</span>
-    <span class="issue-location">extension/background/background.js:74</span>
-  </div>
-  <div class="issue-body">
-    <p><code>awaitingOAuthCallback = true</code> 是内存变量。MV3 的 Service Worker 在 30 秒不活跃后会被终止。如果用户在点击"GitHub 登录"后，在 GitHub 授权页停留超过 30 秒（很常见），SW 被终止，<code>awaitingOAuthCallback</code> 重置为 false，回调永远不会被捕获。</p>
-    <p>结果：用户完成了 GitHub 授权，但扩展永远收不到 token，登录卡死。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    不用内存变量做状态标记。改为在 <code>chrome.storage.session</code> 中设置 <code>ttw_oauth_pending: true</code>（session 级别存储，SW 重启后仍可读取）。<code>chrome.tabs.onUpdated</code> 监听器在 SW 重启后会自动重新注册（声明式事件），回调时从 storage 读取状态。
+    <p>假设 TRAE <code>session_id</code> 前 8 位十六进制 = 创建时间秒。这是逆向推测，<b>非官方 API 契约</b>。一旦 TRAE 改 ID 生成策略（UUID / 增机器位 / 改精度），假设会静默失效：命中区间检查的非法 ID 会被错误归到某天，污染「今日/趋势」统计。当前仅用作 <code>chat_sessions</code> 映射未命中时的兜底，但兜底路径覆盖大量场景。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>① 运行时校验：若连续 N 条 snowflake 时间与 <code>chat_sessions.created_at</code> 偏差 > 10s，自动禁用反推并告警；② 文档明确标注此为「非官方假设，可能失效」；③ 优先保证 chat_sessions 映射命中率。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">handleUsage 被猴补丁（monkey-patch）覆盖，代码可维护性差</span>
-    <span class="issue-location">extension/background/background.js:262-266</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">官方 Worker 不可达时无预检，登录直接跳 404</span><span class="loc">extension/lib/auth.js:59-66</span></div>
   <div class="issue-body">
-    <p>文件底部：</p>
-    <p><code>const _origHandleUsage = handleUsage;<br>handleUsage = async function(payload, sender) {<br>  await _origHandleUsage(payload, sender);<br>  runAlertCheck();<br>};</code></p>
-    <p>这种模式的问题：</p>
-    <p>1. 消息监听器在第 17 行绑定了原始 <code>handleUsage</code>，但 JS 中函数声明会 hoisting，而赋值在文件末尾执行 — 监听器绑定的可能是原始函数而非补丁后的<br>
-    2. 实际上由于 <code>switch</code> 中直接调用 <code>handleUsage(msg.payload, sender)</code>，在 JS 中这会在调用时解析为最新的绑定，所以可能 work — 但这是脆弱的<br>
-    3. 如果未来有人在 handleUsage 和补丁之间添加 return，补丁会被跳过</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    直接在 <code>handleUsage</code> 函数体内调用 <code>runAlertCheck()</code>，删除文件底部的猴补丁代码。
+    <p><code>loginWithGitHub</code> 直接打开 Worker URL，无 <code>/health</code> 预检。若官方 Worker 临时挂掉，用户看到 GitHub 授权页 404 / 跳转失败，无明确提示。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>打开 OAuth 页前先 <code>fetch('/health')</code> 探活，不可达则提示「后端暂时不可用，请稍后或切自部署」。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">syncTimer 在 Service Worker 被终止后丢失，debounce 同步失效</span>
-    <span class="issue-location">extension/background/background.js:105-113</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p2">P2</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">云同步无冲突解决（INSERT OR IGNORE 静默丢弃后到者）</span><span class="loc">worker/src/sync.js:32</span></div>
   <div class="issue-body">
-    <p><code>syncTimer = setTimeout(...)</code> 是内存变量。SW 被终止后，timer 被清除，debounced sync 不会执行。虽然 <code>chrome.alarms.create(SYNC_ALARM, {periodInMinutes: 10})</code> 提供了兜底，但 30 秒 debounce 的实时性丢失。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    用 <code>chrome.alarms.create('ttw-sync-debounce', { delayInMinutes: 0.5 })</code> 替代 setTimeout。SW 重启后 alarm 仍有效。
+    <p>多设备并发 push 同一 <code>client_id</code> 时以先到者为准，后到被忽略。因同一会话累计用量会被覆盖式更新，后到的「更新快照」可能被丢弃，与「最新」不一致（虽同 client_id 通常通过 last-write 大致收敛，但跨设备时钟/顺序不保证）。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>改用 <code>INSERT OR REPLACE</code> 并按 <code>ts</code>/<code>updated_at</code> 比较是否覆盖；或拉取端标记冲突让客户端选择。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">WebSocket 构造函数未正确转发 protocols 参数</span>
-    <span class="issue-location">extension/content/inject.js:808-838</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">sync pull 游标上报 fire-and-forget</span><span class="loc">extension/lib/sync.js:138-145</span></div>
   <div class="issue-body">
-    <p><code>window.WebSocket = function(...args) { const ws = new OriginalWebSocket(...args); ... }</code> — 虽然用 spread 转发了所有参数，但 <code>WebSocket.prototype</code> 的赋值方式不完整：<code>window.WebSocket.prototype = OriginalWebSocket.prototype</code> 意味着 <code>instanceof</code> 可能不可靠（不同构造函数共享同一 prototype）。</p>
-    <p>更关键的是：如果页面代码检查 <code>ws.constructor === WebSocket</code>，会得到 false（因为构造函数已被替换）。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    用 Proxy 包装而非直接替换：<code>window.WebSocket = new Proxy(OriginalWebSocket, { construct(target, args) { ... } })</code>。
+    <p><code>fetch('/api/sync/cursor', ...).catch(()=>{})</code> 失败不回退本地游标。实际本地 <code>lastPullServerTs</code> 已先更新，影响小，但可能浪费带宽重复拉取。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>改为 await，或将服务端游标视为 best-effort，pull 时由本地 since 决定增量。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">EventSource onmessage 属性拦截可能导致内存泄漏</span>
-    <span class="issue-location">extension/content/inject.js:789-795</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">客户端 addRecord 无严格字段校验</span><span class="loc">db.js:80-131</span></div>
   <div class="issue-body">
-    <p><code>Object.defineProperty(es, 'onmessage', {...})</code> 重写了 onmessage setter，但新 setter 只存储了回调引用，没有实际注册到 EventSource 上。这意味着如果页面通过 <code>es.onmessage = fn</code> 设置监听器，fn 不会被 EventSource 调用 — 页面收不到消息！</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在 setter 中同时注册到 EventSource：<code>set: (fn) => { _onmsg = fn; origAdd('message', fn); }</code>。注意避免重复注册。
+    <p>本地 <code>addRecord</code> 仅套默认值，不 clamp 负数 token、不限制 url/model 长度。服务端 <code>num()/flo()</code> 已 clamp，但本地库可能存入负数/超长字段，影响统计与导出。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>入口做白名单 + 类型/范围校验：<code>Math.max(0, Math.floor(n))</code> 对 token；<code>String(v).slice(0,2000)</code> 对字符串。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">IndexedDB 迁移时 cursor 更新无错误处理</span>
-    <span class="issue-location">extension/lib/db.js:32-43</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">导出无校验和 / 原子范围</span><span class="loc">options.js:306-346</span></div>
   <div class="issue-body">
-    <p>v1→v2 迁移用 cursor 遍历旧记录回填 clientId，<code>cursorReq.onsuccess</code> 中 <code>cursor.update(rec)</code> 没有 onerror 处理。如果某条记录更新失败（如 quota 超限），cursor 会停止但不会报错，导致部分记录有 clientId、部分没有。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    为 <code>cursor.update(rec)</code> 添加 <code>onsuccess</code> 和 <code>onerror</code> 处理，记录失败数量并在迁移完成后输出警告。
+    <p>CSV/JSON 导出不含记录数校验和；导出过程中若有新记录写入，预览数与文件数可能不一致。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>导出时锁定范围、文件头含记录数与 checksum；导入时校验。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">importRecords 中的 pending 计数器存在竞态条件</span>
-    <span class="issue-location">extension/lib/db.js:678-734</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">Worker 错误响应无统一错误码</span><span class="loc">worker/src/index.js:80</span></div>
   <div class="issue-body">
-    <p>多个 <code>checkReq.onsuccess</code> 回调中递减 <code>pending</code>，然后在 <code>pending === 0</code> 时设置 <code>tx.oncomplete</code>。但如果所有 checkReq 在同一个事件循环中完成，<code>tx.oncomplete</code> 可能在事务已经完成后才设置，导致 resolve 永远不触发。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在循环开始前就设置 <code>tx.oncomplete</code>，用外部变量跟踪 imported/skipped 计数。
+    <p>所有错误统一返回 <code>{error: message}</code>，客户端只能按 HTTP status 分支，无法程序化区分业务错误（如 NOT_STARRED / QUOTA_EXCEEDED）。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>统一为 <code>{error: message, code: "..."}</code>，扩展端据此精确提示。</div>
   </div>
 </div>
 
 <div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">稳定性</span>
-    <span class="issue-title">content.js 浮窗 refreshTimer 在 SPA 路由切换后可能残留</span>
-    <span class="issue-location">extension/content/content.js:128-129</span>
-  </div>
+  <div class="issue-header"><span class="badge badge-p3">P3</span><span class="badge badge-dim">可靠性</span>
+    <span class="issue-title">OAuth 登出后端删除 session 为 fire-and-forget</span><span class="loc">extension/lib/auth.js:74-77</span></div>
   <div class="issue-body">
-    <p><code>refreshTimer = setInterval(refreshWidgetData, 15000)</code> 在 createWidget 时创建，removeWidget 时清除。但 work.trae.cn 是 SPA，如果页面做客户端路由切换（不刷新页面），content script 不会重新注入，旧的 widget 和 timer 会继续运行。如果页面在路由切换时清除了 DOM，widget host 可能变成孤儿节点。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    监听 <code>document.body</code> 的 MutationObserver，检测 widget host 是否被移除，如果是则清理 timer 和状态。
+    <p><code>logout()</code> 先本地清 session，再 best-effort 通知后端删除；若请求失败，后端 session 残留至 7 天 TTL。本地已清，风险低。</p>
+    <div class="fix"><span class="fix-label">修复建议</span><br>await 后端删除，失败提示用户「本地已登出，服务端 session 将在过期后失效」。</div>
   </div>
 </div>
 
-</div>
-
-<div class="section" id="reliability">
-<h2>四、可靠性 (Reliability) — 10 个问题</h2>
-<p class="section-intro">数据验证缺失、无超时/重试机制、外部依赖故障无降级是核心可靠性风险。</p>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">DeepSeek API 调用无超时和重试机制</span>
-    <span class="issue-location">worker/src/diagnose.js:77-101, extension/popup/popup.js:597-621</span>
-  </div>
-  <div class="issue-body">
-    <p>Worker 端和扩展端的 DeepSeek API 调用都使用裸 <code>fetch</code>，无超时、无重试。如果 DeepSeek API 响应慢（>30 秒）或间歇性失败：</p>
-    <p>1. Worker 端：Cloudflare Workers 有 CPU 时间限制（免费版 10ms，付费版 30s），但 fetch 等待不算 CPU 时间 — 请求会挂起直到客户端超时<br>
-    2. 扩展端：popup 中用户会看到"正在分析..."永远转圈<br>
-    3. 配额已扣但结果未返回（Worker 端 incrementQuota 在 callDeepSeek 之后）</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 用 <code>AbortController</code> 设置 30 秒超时<br>
-    2. 对 5xx 错误做 1 次重试（间隔 1 秒）<br>
-    3. 将 <code>incrementQuota</code> 移到 callDeepSeek 成功后（已如此，确认无误）<br>
-    4. 超时后给用户明确的错误提示和重试按钮
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p1">P1</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">Snowflake ID 时间反推是未文档化的启发式假设</span>
-    <span class="issue-location">extension/content/inject.js:438-446</span>
-  </div>
-  <div class="issue-body">
-    <p>代码假设 TRAE 的 session_id 前 8 位十六进制 = 创建时间的秒数。虽然注释说"已用真实样本验证"，但这不是官方 API 契约。如果 TRAE 更改 ID 生成策略（如改用 UUID、增加机器位、更改时间戳精度），这个假设会静默失效，导致：</p>
-    <p>1. 历史会话被归到错误的时间（2020 年或 2033 年）<br>
-    2. 今日用量统计错误<br>
-    3. 趋势图数据混乱</p>
-    <p>且 <code>deriveTimeFromSessionId</code> 的合理区间检查（1577836800 ~ 2000000000）会在 ID 非法时返回 null，但如果新策略的 ID 恰好落在这个区间，错误数据会被静默接受。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 添加运行时检测：如果连续 N 条记录的 snowflake 时间与 chat_sessions.created_at 偏差超过 10 秒，输出告警并禁用 snowflake 反推<br>
-    2. 在文档中明确标注这是非官方假设<br>
-    3. 考虑在 snowflake 反推前先检查 chat_sessions 映射（已有，但映射命中率取决于用户行为）
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">客户端 addRecord 无数据校验，可写入非法值</span>
-    <span class="issue-location">extension/lib/db.js:72-120</span>
-  </div>
-  <div class="issue-body">
-    <p><code>addRecord</code> 接受任意字段，不做校验：</p>
-    <p>1. 负数 token（inject.js 的 validateUsage 检查了 >= 0，但 background.js 的 spread 操作 <code>payload.inputTokens || 0</code> 不检查负数）<br>
-    2. 超大 timestamp（如未来 100 年）<br>
-    3. 超长字符串字段（url、model 可无限长）<br>
-    4. 非数字类型（如果 inject.js 解析出 NaN，<code>|| 0</code> 会变成 0）</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在 addRecord 入口做白名单字段过滤 + 类型/范围校验。<code>Math.max(0, Math.floor(n))</code> 对 token 数，<code>String(v).slice(0, 2000)</code> 对字符串。
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">官方 Worker 不可达时无降级策略</span>
-    <span class="issue-location">extension/lib/auth.js:99-122</span>
-  </div>
-  <div class="issue-body">
-    <p><code>refreshAuthStatus()</code> 在 fetch 失败时返回 <code>{offline: true}</code>，但登录流程 (<code>loginWithGitHub</code>) 不会检测 Worker 是否可达 — 直接打开 Worker URL。如果 Worker 挂了，用户会看到 GitHub 授权页 404 或跳转失败，没有明确的错误提示。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    在打开 OAuth URL 前先 fetch <code>/health</code> 检查 Worker 可达性。不可达时提示用户"后端服务暂时不可用，请稍后重试或使用自有 Key 模式"。
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">云同步无冲突检测和解决机制</span>
-    <span class="issue-location">worker/src/sync.js:27-56</span>
-  </div>
-  <div class="issue-body">
-    <p>两台设备同时修改同一会话的用量记录（由于覆盖式去重，同一 session_id 只保留一条），push 时 <code>INSERT OR IGNORE</code> 会静默丢弃后到的记录。这意味着：设备 A 的记录覆盖了设备 B 的，但设备 B 的 push 被忽略。pull 时两台设备看到的是先 push 的那台的记录，而非最新的。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. push 时用 <code>INSERT OR REPLACE</code>，比较 ts 字段决定是否覆盖<br>
-    2. 或增加 <code>updated_at</code> 字段，只在记录更新时才覆盖<br>
-    3. 在 pull 结果中标记冲突记录，让客户端选择保留哪条
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">导出功能无数据完整性校验</span>
-    <span class="issue-location">extension/options/options.js:306-326</span>
-  </div>
-  <div class="issue-body">
-    <p>CSV/JSON 导出不包含校验和或记录数验证。如果导出过程中 IndexedDB 数据被修改（新记录写入），可能导致导出的记录数与预览不一致。JSON 导出虽然包含 summary，但没有 checksum 验证。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 导出时锁定读取范围（记录 startTs/endTs），在文件中包含记录数和 checksum<br>
-    2. 导入时验证 checksum
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">sync pull 的游标汇报是 fire-and-forget，可能丢失</span>
-    <span class="issue-location">extension/lib/sync.js:138-145</span>
-  </div>
-  <div class="issue-body">
-    <p><code>fetch('/api/sync/cursor', {...}).catch(() => {})</code> — 如果游标汇报失败（网络错误），本地游标已更新但服务端未更新。下次 pull 会从旧游标开始，重复拉取已导入的记录。虽然有 <code>clientId</code> 去重保护，但浪费带宽和 CPU。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    将游标汇报改为 await，失败时不更新本地游标。或在 pull 时用 <code>since</code> 参数从服务端获取上次确认的游标。
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">getAllRecords 无分页保护，大数据量可能 OOM</span>
-    <span class="issue-location">extension/lib/db.js:138-158</span>
-  </div>
-  <div class="issue-body">
-    <p>cursor 遍历到 <code>limit</code> 条后停止，但每条记录的 <code>url</code> 和 <code>userInputPreview</code> 可能很长（各 2000 字符）。2000 条记录 × 4KB/条 ≈ 8MB。在 popup（内存受限环境）中可能触发浏览器内存限制。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    1. 在查询时只选取需要的字段（IndexedDB 不支持投影，但可以在遍历时裁剪）<br>
-    2. 降低默认 limit 到 500<br>
-    3. 对 url/userInputPreview 做长度限制（写入时截断）
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">Worker 错误处理不区分客户端错误和服务端错误</span>
-    <span class="issue-location">worker/src/index.js:76-81</span>
-  </div>
-  <div class="issue-body">
-    <p><code>catch (err) { const status = err.status || 500; ... if (status >= 500) console.error(...) }</code> — 所有错误都返回 <code>{error: message}</code>，客户端无法区分"网络错误"和"业务错误"。4xx 错误也被包装成 JSON 返回，但缺少错误码（error code）供客户端程序化处理。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    统一错误响应格式：<code>{error: message, code: "NOT_STARRED" | "QUOTA_EXCEEDED" | ...}</code>。
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">可靠性</span>
-    <span class="issue-title">OAuth 登出只删除服务端 session，未清理扩展端存储的 session</span>
-    <span class="issue-location">extension/lib/auth.js:69-80</span>
-  </div>
-  <div class="issue-body">
-    <p><code>logout()</code> 先 fetch 通知后端删除 session（fire-and-forget），然后 <code>clearSession()</code> 清除本地。如果 fetch 失败（网络错误），后端 session 仍然有效 — 虽然本地已清除，但后端存在的 session token 如果被截获仍可使用。</p>
-  </div>
-  <div class="fix">
-    <span class="fix-label">修复建议</span><br>
-    logout 时 await fetch，失败时提示用户"本地已登出，但服务端 session 可能未清除，将在过期后自动失效"。session TTL 7 天是合理的兜底。
-  </div>
-</div>
-
-</div>
-
-<div class="section" id="quality">
-<h2>五、代码质量 (Code Quality) — 5 个建议</h2>
-<p class="section-intro">不影响功能但影响长期可维护性的改进建议。</p>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">质量</span>
-    <span class="issue-title">工具函数在 popup.js / content.js / options.js 中重复定义</span>
-  </div>
-  <div class="issue-body">
-    <p><code>fmt()</code>、<code>escapeHtml()</code>、<code>shortModel()</code> 在三个文件中各自定义了一遍。<code>startOfDay()</code> 在 db.js 和 background.js 中各有一份。应提取到 <code>lib/utils.js</code> 中统一导出。</p>
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">质量</span>
-    <span class="issue-title">整个项目无 TypeScript，复杂的数据结构缺乏类型保护</span>
-  </div>
-  <div class="issue-body">
-    <p>用量记录有 15+ 个可选字段，session 有 5 个字段，同步状态有 3 个字段。这些数据在 background → db → popup → worker 之间流转，任何一个环节拼错字段名都不会报错，只会静默 <code>undefined</code>。TypeScript 的 JSDoc 模式（<code>// @ts-check</code>）可以在不改变现有构建流程的情况下提供类型检查。</p>
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">质量</span>
-    <span class="issue-title">无任何单元测试或集成测试</span>
-  </div>
-  <div class="issue-body">
-    <p>核心逻辑如 <code>extractUsage</code>、<code>parseSSE</code>、<code>deriveTimeFromSessionId</code>、<code>getSummary</code> 的正确性完全依赖手动测试。这些函数处理的是外部 API 响应，格式可能随时变化，没有回归测试保护非常危险。</p>
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">质量</span>
-    <span class="issue-title">magic number 散布在代码中，无集中配置</span>
-  </div>
-  <div class="issue-body">
-    <p><code>DEDUP_WINDOW = 3000</code>、<code>SESSION_MAP_MAX = 400</code>、<code>CTX_TTL = 60000</code>、<code>SAMPLE_LIMIT = 2</code>、<code>debugLog.length > 300</code>、<code>SYNC_DEBOUNCE_MS = 30000</code> 等。应集中到一个 config 模块中。</p>
-  </div>
-</div>
-
-<div class="issue">
-  <div class="issue-header">
-    <span class="badge badge-p2">P2</span>
-    <span class="badge badge-dim">质量</span>
-    <span class="issue-title">manifest.json 版本号为 0.1.0 但 README 描述了 v8 迭代，版本管理脱节</span>
-  </div>
-  <div class="issue-body">
-    <p>inject.js 注释标注为 v8，但 manifest.json 的 version 仍为 0.1.0。应建立语义化版本号与代码迭代版本的对应关系，便于用户和开发者追踪变更。</p>
-  </div>
-</div>
-
-</div>
-
-<div class="section" id="priority">
-<h2>六、优化优先级排序</h2>
-<p class="section-intro">建议按以下顺序修复，P0 问题应在下一次发布前解决。</p>
-
+<!-- ===================== 优化优先级 ===================== -->
+<h2>五、优化优先级排序</h2>
 <table>
-  <thead>
-    <tr><th>优先级</th><th>问题</th><th>模块</th><th>影响面</th><th>预估工作量</th></tr>
-  </thead>
+  <thead><tr><th>优先级</th><th>问题</th><th>模块</th><th>预估工作量</th></tr></thead>
   <tbody>
-    <tr><td style="color:#c44;font-weight:600">P0-1</td><td>CORS 通配符 → 白名单</td><td>worker/index.js</td><td>所有 API 端点</td><td>0.5h</td></tr>
-    <tr><td style="color:#c44;font-weight:600">P0-2</td><td>OAuth state 签名/存储验证</td><td>worker/auth.js</td><td>登录流程</td><td>2h</td></tr>
-    <tr><td style="color:#c44;font-weight:600">P0-3</td><td>IDB 单例连接</td><td>extension/lib/db.js</td><td>所有数据操作</td><td>1h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-1</td><td>SW 生命周期 → storage.session</td><td>background.js</td><td>OAuth + sync</td><td>2h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-2</td><td>getSummary 单次遍历 + 缓存</td><td>db.js + popup.js</td><td>仪表盘性能</td><td>3h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-3</td><td>refreshBadge 用 count() 替代 getAll</td><td>background.js</td><td>每次写入</td><td>0.5h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-4</td><td>DeepSeek API 超时 + 重试</td><td>worker + popup</td><td>诊断功能</td><td>1h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-5</td><td>handleUsage 猴补丁 → 内联</td><td>background.js</td><td>代码维护</td><td>0.5h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-6</td><td>sync push 速率限制</td><td>worker/sync.js</td><td>后端安全</td><td>1h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-7</td><td>token 传递改为 fragment/code</td><td>worker/auth.js</td><td>登录安全</td><td>2h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-8</td><td>AES 密钥派生改用 HKDF</td><td>worker/github.js</td><td>token 加密</td><td>1h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-9</td><td>fetch 拦截器选择性 clone</td><td>inject.js</td><td>页面性能</td><td>2h</td></tr>
-    <tr><td style="color:#d48806;font-weight:600">P1-10</td><td>popup 事件驱动刷新</td><td>popup.js</td><td>仪表盘性能</td><td>2h</td></tr>
+    <tr><td class="p1" style="font-weight:600">P1-1</td><td>Popup 事件驱动刷新 + 范围查询替代全量加载</td><td>popup.js / db.js</td><td>3h</td></tr>
+    <tr><td class="p1" style="font-weight:600">P1-2</td><td>fetch 拦截器按体积/流式选择性解析响应体</td><td>inject.js</td><td>2h</td></tr>
+    <tr><td class="p1" style="font-weight:600">P1-3</td><td>移除 checkStarredPublic 限流雷区（强制持久化 token）</td><td>worker/github.js</td><td>1.5h</td></tr>
+    <tr><td class="p1" style="font-weight:600">P1-4</td><td>Snowflake 反推加运行时校验 + 偏离自动禁用</td><td>inject.js</td><td>2h</td></tr>
+    <tr><td class="p2" style="font-weight:600">P2-1</td><td>DeepSeek Key 存储加固 + 修正 README 虚假承诺</td><td>options/popup · README</td><td>1h</td></tr>
+    <tr><td class="p2" style="font-weight:600">P2-2</td><td>token 改用 fragment / 一次性 code</td><td>worker/auth.js</td><td>2h</td></tr>
+    <tr><td class="p2" style="font-weight:600">P2-3</td><td>云端同步隐私告知 + 可选脱敏</td><td>options.js · README</td><td>1.5h</td></tr>
+    <tr><td class="p2" style="font-weight:600">P2-4</td><td>EventSource onmessage 拦截修复</td><td>inject.js</td><td>0.5h</td></tr>
+    <tr><td class="p2" style="font-weight:600">P2-5</td><td>SW syncTimer 改用 chrome.alarms</td><td>background.js</td><td>0.5h</td></tr>
+    <tr><td class="p3" style="font-weight:600">P3</td><td>其余 9 项：AES-HKDF / postMessage origin / JWT 内存化 / getComparison 拆分 / 导出 checksum / 统一错误码 等</td><td>多处</td><td>各 0.5-1h</td></tr>
   </tbody>
 </table>
 
-</div>
-
 <div class="footer">
-  <p>trae-token-watcher 架构审计报告 · Generated by Karpathy (AI Architect) · 2026-08-12</p>
+  <p>trae-token-watcher 架构审计报告 v2 · 相对 2026-08-12 版本已校正 · Generated by Karpathy (AI Architect) · 2026-08-13</p>
 </div>
 
 </div>

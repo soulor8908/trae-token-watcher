@@ -6,6 +6,10 @@ const DB_VERSION = 3;
 const STORE_RECORDS = 'usage-records';
 const STORE_DIAGNOSES = 'diagnoses';
 
+// getSummary 只加载近 N 天记录（覆盖月桶 + 14 天趋势），走 timestamp 索引范围查询，
+// 避免每次刷新都 getAllRecords(2000) 全量扫描，降低 IDB 与主线程负载。
+const SUMMARY_WINDOW_DAYS = 31;
+
 let _dbPromise = null;
 
 // 单例连接：IndexedDB 打开是异步且有开销，复用同一个连接，避免每次读写都 open/close
@@ -183,14 +187,16 @@ export async function getAllRecords(limit = 500) {
 
 // 聚合统计：按时间段汇总 token 用量
 export async function getSummary() {
-  const records = await getAllRecords(2000);
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
+  // 仅取近 SUMMARY_WINDOW_DAYS 天（索引范围查询），覆盖月桶与 14 天趋势所需数据，
+  // 不再全量加载 2000 条，popup 每 5s 刷新时显著降负载。
+  const records = await getRecordsSince(now - SUMMARY_WINDOW_DAYS * dayMs);
 
   const buckets = {
     today: { since: startOfDay(now), input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
     week: { since: now - 7 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
-    month: { since: now - 30 * dayMs, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
+    month: { since: startOfMonth(now), input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
     all: { since: 0, input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
   };
 
@@ -795,6 +801,13 @@ export async function getMaxLocalId() {
 // 辅助函数
 function startOfDay(ts) {
   const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfMonth(ts) {
+  const d = new Date(ts);
+  d.setDate(1);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }

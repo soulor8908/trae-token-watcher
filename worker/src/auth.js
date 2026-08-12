@@ -1,7 +1,7 @@
 // OAuth 流程 — /auth/github 跳转 + /auth/callback 回调 + 状态查询
 // 流程：扩展打开 /auth/github?ext_id=xxx → GitHub 授权 → 回调换 token → 检查 Star → 签发 session → 重定向回扩展
 
-import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, checkStarredPublic, encryptToken, decryptToken, httpError } from './github.js';
+import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, encryptToken, decryptToken, httpError } from './github.js';
 import { upsertUser, saveGithubToken, getGithubToken, purgeExpiredSessions, deleteSession } from './db.js';
 import { issueSession, hashToken } from './session.js';
 
@@ -189,9 +189,18 @@ export async function handleRefreshStar(env, session) {
       starred = await checkStarred(accessToken, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
       checked = true;
     } else {
-      // 老用户尚未重新登录、无持久化 token：用公开 stargazers 接口按 login 兜底
-      starred = await checkStarredPublic(session.login, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
-      checked = true;
+      // 无持久化 token：已移除未认证公开 stargazers 兜底（受 60 次/小时 IP 限流，
+      // Worker 共享出口 IP 易耗尽并误拒已 Star 用户）。直接复用 KV 缓存；
+      // 无缓存则建议用户重新登录以刷新 Star 状态。
+      const cached = await env.KV.get(`star:u:${session.user_id}`);
+      if (cached !== null) {
+        starred = cached === '1';
+        checked = true;
+      } else {
+        console.warn('[refresh-star] 无持久化 token 且无 KV 缓存，建议重新登录以刷新 Star 状态');
+        starred = false;
+        checked = false; // 不写缓存，避免把"未知"误判为"未 star"
+      }
     }
   } catch (e) {
     // 回查失败（网络/限流/解密失败）：降级读缓存，避免误判

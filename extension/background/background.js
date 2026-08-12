@@ -159,6 +159,8 @@ async function handleUsage(payload, sender) {
       ...(payload.userInputPreview != null ? { userInputPreview: payload.userInputPreview } : {}),
     });
     refreshBadge();
+    // 发布刷新信号：popup / 浮窗监听此 key 的变化即可事件驱动刷新，无需固定高频轮询
+    chrome.storage.local.set({ ttw_usage_ping: Date.now() }).catch(() => {});
     console.log('[trae-token-watcher] 记录:', payload.source, payload.totalTokens, 'tokens |', payload.model, '|', payload.url);
     scheduleDebouncedSync();
     runAlertCheck(); // 写入后顺带检查预警（内部自带冷却，不会重复通知）

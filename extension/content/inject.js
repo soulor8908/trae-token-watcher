@@ -49,6 +49,17 @@
   const pendingSessionFetches = new Map(); // 并发去重的详情拉取
   const SESSION_MAP_MAX = 400;
 
+  // ---------- Snowflake 时间反推可靠性自检 ----------
+  // deriveTimeFromSessionId 假设 session_id 前 8 位十六进制 = 创建时间（秒），属未契约启发式。
+  // 用权威 chat_sessions.created_at（captureSessions 落库）与反推值对比，若持续偏差则判定该
+  // 启发式已失效（TRAE 改动 ID 策略时），禁用反推并降级到采集时刻，避免静默误归因。
+  let _sfSamples = 0;
+  let _sfMismatch = 0;
+  let _sfTrusted = true;
+  const SF_DRIFT_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 偏差 > 1 天视为不一致
+  const SF_DRIFT_MIN_SAMPLES = 5;
+  const SF_DRIFT_MAX_RATIO = 0.5;
+
   function pushDebug(entry) {
     if (!DEBUG) return;
     // 对已知噪音 URL 采样（只记前 2 条）
@@ -433,6 +444,18 @@
         title: typeof it.title === 'string' ? it.title : null,
         mode: typeof it.mode === 'string' ? it.mode : null,
       });
+      // 自检：用本条权威 created_at 校验 snowflake 反推是否仍可靠
+      if (_sfTrusted) {
+        const derived = deriveTimeFromSessionId(id);
+        if (derived != null) {
+          _sfSamples++;
+          if (Math.abs(derived - createdAt) > SF_DRIFT_THRESHOLD_MS) _sfMismatch++;
+          if (_sfSamples >= SF_DRIFT_MIN_SAMPLES && _sfMismatch / _sfSamples > SF_DRIFT_MAX_RATIO) {
+            _sfTrusted = false;
+            console.warn(TAG, '[snowflake] 反推值与权威 created_at 持续偏差，已禁用时间戳反推，降级为采集时刻');
+          }
+        }
+      }
     }
     if (sessionInfoMap.size > SESSION_MAP_MAX) {
       const keys = [...sessionInfoMap.keys()].slice(0, sessionInfoMap.size - SESSION_MAP_MAX);
@@ -446,6 +469,7 @@
   // 十六进制 == chat_sessions.created_at/1000（如 6a34972e == 1781831470 == 1781831470369/1000）。
   // 这是零网络开销、100% 可靠的兜底，覆盖「会话不在已捕获列表里」的情形。
   function deriveTimeFromSessionId(id) {
+    if (!_sfTrusted) return null; // 自检已判定该启发式失效，禁用反推
     if (typeof id !== 'string' || id.length < 8) return null;
     const hex = id.slice(0, 8).toLowerCase();
     if (!/^[0-9a-f]{8}$/.test(hex)) return null;
@@ -697,6 +721,14 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
       // 响应体解析 + debug log 记录
       // 条件：对话 URL 或 SSE 响应（兜底）
       if (isApi || isSse) {
+        // 体积护盾：超大响应体（如超长 SSE / 大 JSON）若全量 clone().text() 再主线程解析，
+        // 会阻塞页面交互。超过阈值则跳过 body 解析（header 里已优先提取 usage，影响极小）。
+        const lenHeader = response.headers.get('content-length');
+        const bodyLen = lenHeader ? parseInt(lenHeader, 10) : NaN;
+        const MAX_BODY_READ = 4 * 1024 * 1024; // 4MB 上限，超过则跳过主线程解析，避免卡顿
+        if (!isNaN(bodyLen) && bodyLen > MAX_BODY_READ) {
+          log(`fetch resp 过大(${bodyLen} 字节)，跳过 body 解析`);
+        } else {
         const clone = response.clone();
         clone.text().then((text) => {
           log(`fetch resp: ${method} ${url} | ${text.length} 字符 | ct: ${ct}`);
@@ -711,6 +743,7 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
             reportBulkItems(bulkArr.items, url);
           }
         }).catch(() => {});
+        }
       }
     } catch (e) {
       log('fetch 拦截异常:', e);

@@ -53,7 +53,11 @@ function sendMessage(type, payload) {
 let cachedSummary = null;
 let modelMetric = 'tokens'; // 'tokens' | 'cost'
 
+let _rendering = false;
 async function renderSummary() {
+  if (_rendering) return; // 防止事件驱动刷新与定时轮询并发重入
+  _rendering = true;
+  try {
   const summary = await getSummary();
   cachedSummary = summary;
   const { buckets, trend, byModel, bySession, cacheStats, totalRecords } = summary;
@@ -98,6 +102,9 @@ async function renderSummary() {
 
   // 预警检查
   renderAlert(await checkAlert());
+  } finally {
+    _rendering = false;
+  }
 }
 
 function animateNum(id, target) {
@@ -263,7 +270,7 @@ function renderModelCompare(byModel) {
 
 // ---------- 会话级明细（滚动到底自动加载更多，最多展示近一个月）----------
 const SESSION_PAGE = 30;        // 每批渲染条数
-const SESSION_MONTH_DAYS = 30;  // 明细最多覆盖的天数
+const SESSION_MONTH_DAYS = 31;  // 明细最多覆盖的天数（按最长月份 31 天，避免月初截断）
 let _sessData = [];             // 近一个月内、按 lastActive 降序的全部会话
 let _sessMaxTotal = 1;          // 进度条百分比基准（一个月范围内的最大值）
 let _sessRendered = 0;          // 已渲染条数
@@ -1117,8 +1124,16 @@ document.getElementById('widgetBtn').addEventListener('click', async () => {
 
 // ---------- 预警设置已迁移到设置页 ----------
 
-// 监听 storage 变化（OAuth 回调页写入 session 后，popup 若开着能刷新）
+// 监听 storage 变化：新用量到达时事件驱动刷新（替代固定高频轮询）
+let _pingTimer = null;
+function scheduleSummaryRefresh() {
+  if (_pingTimer) clearTimeout(_pingTimer);
+  _pingTimer = setTimeout(() => { _pingTimer = null; renderSummary(); }, 800);
+}
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.ttw_usage_ping) {
+    scheduleSummaryRefresh(); // 防抖：批量写入期间只重渲染一次
+  }
   if (area === 'local' && changes.ttw_session) {
     renderAccount();
   }
@@ -1166,6 +1181,6 @@ document.getElementById('modelToggle').addEventListener('click', (e) => {
   await renderAccount();
   await renderSummary();
   await renderDiagHistory();
-  // 每 5 秒刷新一次（popup 打开期间）
-  setInterval(renderSummary, 5000);
+  // 事件驱动刷新为主（ttw_usage_ping），15s 轮询仅作兜底，降低 IDB 负载
+  setInterval(renderSummary, 15000);
 })();

@@ -71,30 +71,9 @@ export async function checkStarred(accessToken, owner, repo) {
   throw httpError(502, `GitHub Star 检查接口返回 ${resp.status}`);
 }
 
-// 公开接口检查 login 是否 Star 了指定仓库（不需要 access_token）
-// 用于持久化 token 缺失时的兜底回查（如老用户尚未重新登录）
-// 限制：未认证 60 次/小时（按出口 IP），且仓库 star 数 > 上限时可能漏判
-const STAR_PUBLIC_MAX_PAGES = 10; // 最多翻 10 页（1000 个最新 stargazer）
-export async function checkStarredPublic(login, owner, repo) {
-  for (let page = 1; page <= STAR_PUBLIC_MAX_PAGES; page++) {
-    const resp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/stargazers?per_page=100&page=${page}`, {
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'trae-token-watcher',
-      },
-    });
-    if (!resp.ok) {
-      // 403 通常是未认证限流，按未 star 处理避免误放行
-      if (resp.status === 403) return false;
-      throw httpError(502, `GitHub stargazers 接口返回 ${resp.status}`);
-    }
-    const users = await resp.json();
-    if (!Array.isArray(users) || users.length === 0) return false;
-    if (users.some((u) => u && u.login === login)) return true;
-    if (users.length < 100) return false; // 已到最后一页
-  }
-  return false; // 超过上限仍未找到，按未 star 处理
-}
+// 注：原 checkStarredPublic（未认证公开 stargazers 兜底）已移除——
+// 未认证接口受 60 次/小时 IP 限流，且 Worker 共享出口 IP，多用户触发易耗尽并误拒已 Star 用户。
+// 当前登录流程已强制持久化 access_token，Star 回查一律走 checkStarred（精确端点）。
 
 // ---------- access_token 加密存储（AES-GCM）----------
 // 密钥由 SESSION_SECRET 经 SHA-256 派生；secret 变更后旧密文不可解，需重新登录
