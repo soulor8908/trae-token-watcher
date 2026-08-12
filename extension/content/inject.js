@@ -28,7 +28,7 @@
 //   - 该接口一次返回全部会话用量（user_usage_group_by_sessions[]），每条自带真实 usage_time（秒）、
 //     extra_info（input/output/cache_read/cache_write token）、credits_float、cost_money_float、
 //     model_name、user_input_preview、session_id、usage_source —— 比逐会话 get_session_usage 更完整。
-//   - 用户一进 work.trae.cn（顶层 frame），默认主动拉取最近 30 天的用量并写入账本，
+//   - 用户一进 *.trae.cn（顶层 frame），默认主动拉取最近 30 天的用量并写入账本，
 //     无需手动翻看每个会话；数据自带 usage_time，时间归因直接用真实发生时刻，不再依赖 snowflake 反推。
 //   - 被动拦截保留：页面自然触发该接口时也捕获，并记住成功 path 供后续复用（localStorage）。
 (function () {

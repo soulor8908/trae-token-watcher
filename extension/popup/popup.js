@@ -71,17 +71,6 @@ async function renderSummary() {
   document.getElementById('weekCredits').textContent = `◈ ${buckets.week.credits.toFixed(2)} 积分 / ¥${buckets.week.costMoney.toFixed(3)}`;
   document.getElementById('monthCredits').textContent = `◈ ${buckets.month.credits.toFixed(2)} 积分 / ¥${buckets.month.costMoney.toFixed(3)}`;
 
-  // 状态指示
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-  if (totalRecords > 0) {
-    statusDot.classList.add('active');
-    statusText.textContent = `共 ${totalRecords} 条记录`;
-  } else {
-    statusDot.classList.remove('active');
-    statusText.textContent = '等待数据';
-  }
-
   // 趋势图
   renderChart(trend);
 
@@ -556,7 +545,7 @@ function renderRecords(records) {
   if (!renderChanged('records', records)) return;
   const container = document.getElementById('records');
   if (!records || records.length === 0) {
-    container.innerHTML = '<div class="empty">暂无记录，打开 work.trae.cn 开始对话即可采集</div>';
+    container.innerHTML = '<div class="empty">暂无记录，打开 *.trae.cn 开始对话即可采集</div>';
     return;
   }
   container.innerHTML = records.map((r, i) => {
@@ -648,7 +637,7 @@ async function diagnose() {
 
   const summary = await getSummary();
   if (summary.totalRecords === 0) {
-    resultEl.textContent = '暂无用量数据，请先在 work.trae.cn 产生对话';
+    resultEl.textContent = '暂无用量数据，请先在 *.trae.cn 产生对话';
     resultEl.className = 'diag-result show error';
     return;
   }
@@ -1099,7 +1088,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   await renderAccount();
 });
 
-// 浮窗开关：在 work.trae.cn 页面显示/隐藏浮动小组件
+// 浮窗开关：在 *.trae.cn 页面显示/隐藏浮动小组件
 let widgetOn = true;
 async function loadWidgetState() {
   const { ttw_widget_state: state } = await chrome.storage.local.get('ttw_widget_state');
@@ -1108,7 +1097,7 @@ async function loadWidgetState() {
 }
 function updateWidgetBtn() {
   const btn = document.getElementById('widgetBtn');
-  btn.textContent = widgetOn ? '浮窗●' : '浮窗';
+  if (!btn) return;
   btn.classList.toggle('on', widgetOn);
 }
 document.getElementById('widgetBtn').addEventListener('click', async () => {
