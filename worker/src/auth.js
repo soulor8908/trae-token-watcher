@@ -5,6 +5,28 @@ import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, che
 import { upsertUser, saveGithubToken, getGithubToken, purgeExpiredSessions, deleteSession } from './db.js';
 import { issueSession, hashToken } from './session.js';
 
+// ---------- OAuth state 防篡改签名（HMAC-SHA256）----------
+// 用 SESSION_SECRET 对 state 负载签名，回调时校验，防止 state 被伪造 / OAuth CSRF
+async function signState(payloadB64, env) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(env?.SESSION_SECRET || ''),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadB64));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 常量时间比较，规避时序侧信道
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
 // GET /auth/github — 跳转到 GitHub 授权页
 // state 编码 ext_id，回调时用于重定向回扩展
 export async function handleAuthStart(request, env) {
@@ -14,10 +36,11 @@ export async function handleAuthStart(request, env) {
     throw httpError(400, '缺少 ext_id 参数');
   }
 
-  // state = base64(ext_id + 随机 nonce)，防 CSRF
+  // state = base64(payload) + '.' + HMAC 签名；签名防篡改，nonce 防重放
   const nonce = crypto.randomUUID().replace(/-/g, '');
-  const stateRaw = JSON.stringify({ extId, nonce });
-  const state = btoa(stateRaw);
+  const payloadB64 = btoa(JSON.stringify({ extId, nonce }));
+  const sig = await signState(payloadB64, env);
+  const state = `${payloadB64}.${sig}`;
 
   const callbackUrl = `${url.origin}/auth/callback`;
   const authorizeUrl = buildAuthorizeUrl(env, state, callbackUrl);
@@ -38,10 +61,22 @@ export async function handleAuthCallback(request, env, ctx) {
     throw httpError(400, '回调缺少 code 或 state 参数');
   }
 
+  // 校验 state 签名（防篡改 / OAuth CSRF）：无签名或签名不匹配一律拒绝
+  const dotIdx = state.lastIndexOf('.');
+  if (dotIdx < 0) {
+    throw httpError(400, 'state 格式无效');
+  }
+  const payloadB64 = state.slice(0, dotIdx);
+  const providedSig = state.slice(dotIdx + 1);
+  const expectedSig = await signState(payloadB64, env);
+  if (!timingSafeEqual(providedSig, expectedSig)) {
+    throw httpError(400, 'state 校验失败（可能已被篡改）');
+  }
+
   // 解析 state 还原 ext_id
   let extId;
   try {
-    const decoded = JSON.parse(atob(state));
+    const decoded = JSON.parse(atob(payloadB64));
     extId = decoded.extId;
   } catch (_) {
     throw httpError(400, 'state 参数无效');

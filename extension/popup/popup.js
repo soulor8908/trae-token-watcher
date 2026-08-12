@@ -26,6 +26,22 @@ function shortModel(model) {
   return model.length > 24 ? model.slice(0, 24) + '…' : model;
 }
 
+// 缓存命中率 = cachedTokens / (inputTokens + cachedTokens)，与 db.js computeCacheRate 保持一致
+function cacheRateOf(input, cached) {
+  const denom = (input || 0) + (cached || 0);
+  if (denom <= 0) return null;
+  return cached / denom;
+}
+
+// 渲染缓存命中率小标签（按命中率高低配色：高=绿 / 中=琥珀 / 低=红）
+function cacheRateChip(input, cached) {
+  const rate = cacheRateOf(input, cached);
+  if (rate == null) return '';
+  const pct = Math.round(rate * 100);
+  const cls = rate >= 0.5 ? 'hi' : rate >= 0.2 ? 'mid' : 'lo';
+  return `<span class="tok cache-rate ${cls}" title="缓存命中率 = 缓存 / (输入+缓存) = ${pct}%">♻${pct}%</span>`;
+}
+
 function sendMessage(type, payload) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type, payload }, (resp) => resolve(resp));
@@ -261,6 +277,7 @@ function renderSessions(bySession) {
           <span class="tok in">↓${fmt(s.input)}</span>
           <span class="tok out">↑${fmt(s.output)}</span>
           <span class="tok total">Σ${fmt(s.total)}</span>
+          ${cacheRateChip(s.input, s.cached)}
           ${s.credits > 0 ? `<span class="tok credits">◈${s.credits.toFixed(2)}</span>` : ''}
         </div>
       </div>`;
@@ -395,6 +412,7 @@ function sourceTag(source) {
     'xhr-header': { txt: '响应头', cls: 'src-header' },
     'xhr-body': { txt: '响应体', cls: 'src-body' },
     'websocket': { txt: 'WS', cls: 'src-ws' },
+    'bulk-usage': { txt: '批量', cls: 'src-bulk' },
   };
   const m = map[source] || { txt: source || '未知', cls: 'src-other' };
   return `<span class="src-tag ${m.cls}">${m.txt}</span>`;
@@ -453,6 +471,7 @@ function renderRecords(records) {
           <span class="tok total" title="总计">Σ${fmt(r.totalTokens)}</span>
           ${cachedTxt}
           ${cacheWTxt}
+          ${cacheRateChip(r.inputTokens, r.cachedTokens)}
           ${creditsTxt}
           ${costTxt}
           ${remainTxt}
@@ -938,6 +957,12 @@ document.getElementById('diagBtn').addEventListener('click', diagnose);
 function openOptions() {
   chrome.runtime.openOptionsPage();
 }
+
+// 全屏面板：在新标签页打开同一仪表盘，绕过 Chrome 弹框 ~600px 高度上限
+document.getElementById('fullBtn').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') + '?full=1' });
+  window.close();
+});
 document.getElementById('optionsBtn').addEventListener('click', openOptions);
 document.getElementById('openOptionsFromDiag').addEventListener('click', openOptions);
 
@@ -1024,6 +1049,10 @@ document.getElementById('modelToggle').addEventListener('click', (e) => {
 
 // ---------- 初始化 ----------
 (async function init() {
+  // 全屏模式：从新标签页打开（?full=1）时解除弹框高度上限，页面自然滚动
+  if (new URLSearchParams(location.search).get('full') === '1') {
+    document.body.classList.add('full-mode');
+  }
   await loadDiagDefaultMode();
   await loadWidgetState();
   await renderAccount();

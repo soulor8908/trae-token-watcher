@@ -2,7 +2,7 @@
 
 > Chrome 扩展 · 本地优先的 TRAE Work Token 消耗监控 + AI 驱动积分优化
 
-**trae-token-watcher** 是一个运行在浏览器里的「Token 账本」。它在你使用 [work.trae.cn](https://work.trae.cn) 时，**自动、无感地**记录每一次对话消耗的 Token、积分与费用，把分散在会话里的数据聚合成可量化、可回看、可优化的账本——并且**所有数据只存在你本地浏览器**，不上传任何第三方。
+**trae-token-watcher** 是一个运行在浏览器里的「Token 账本」。它在你使用trae的官网 [www.trae.cn](https://www.trae.cn) 、论坛和traework 网页版时，**自动、无感地**记录每一次对话消耗的 Token、积分与费用，把分散在会话里的数据聚合成可量化、可回看、可优化的账本——并且**所有数据只存在你本地浏览器**，不上传任何第三方。
 
 ---
 
@@ -21,15 +21,15 @@ trae-token-watcher 的定位就是：**把用量数据「还」给用户**——
 
 ### 核心能力
 
-| 能力 | 说明 | 亮点 |
-|---|---|---|
-| **自动采集** | 拦截 work.trae.cn 的 API 响应，提取 Token / 积分 / 费用 | 无感、零配置，打开网页即用 |
-| **本地优先存储** | 全部数据存浏览器 IndexedDB | 不上传后端、隐私可控 |
-| **仪表盘** | 今日 / 本周 / 本月汇总、14 天趋势、模型分布、最近记录 | 一眼看清钱花在哪 |
-| **准确的时间归因** | 历史会话归到它**真实发生的那天**，而非你「翻看它的那天」 | 解决「看历史把今天用量虚增」的难题 |
-| **按会话去重** | 同一 `session_id` 只保留一条最新快照 | 反复查看历史不产生重复数据 |
-| **AI 诊断** | 分析你的用法，给出省 Token / 省积分的优化建议 | 双路径：官方后端 or 自有 Key |
-| **诊断历史** | 每次诊断自动存档，可回看、可对比、可删除 | 优化建议「可追溯」 |
+| 能力          | 说明                                                               | 亮点                 |
+| ----------- | ---------------------------------------------------------------- | ------------------ |
+| **自动采集**    | 拦截 [www.trae.cn](http://www.trae.cn) 的 API 响应，提取 Token / 积分 / 费用 | 无感、零配置，打开网页即用      |
+| **本地优先存储**  | 全部数据存浏览器 IndexedDB                                               | 不上传后端、隐私可控         |
+| **仪表盘**     | 今日 / 本周 / 本月汇总、14 天趋势、模型分布、最近记录                                  | 一眼看清钱花在哪           |
+| **准确的时间归因** | 历史会话归到它**真实发生的那天**，而非你「翻看它的那天」                                   | 解决「看历史把今天用量虚增」的难题  |
+| **按会话去重**   | 同一 `session_id` 只保留一条最新快照                                        | 反复查看历史不产生重复数据      |
+| **AI 诊断**   | 分析你的用法，给出省 Token / 省积分的优化建议                                      | 双路径：官方后端 or 自有 Key |
+| **诊断历史**    | 每次诊断自动存档，可回看、可对比、可删除                                             | 优化建议「可追溯」          |
 
 ### 为什么它值得用
 
@@ -76,9 +76,11 @@ TRAE 的用量数据来自 `get_session_usage` 接口，它返回的是**某个�
 1. 打开 Chrome，访问 `chrome://extensions/`
 2. 开启右上角「开发者模式」
 3. 点击「加载已解压的扩展程序」，选择本仓库的 `extension/` 目录
-4. 打开 [work.trae.cn](https://work.trae.cn) 开始对话，Token 数据会自动采集
+4. 打开 [www.trae.cn](https://www.trae.cn) 开始对话，Token 数据会自动采集
 
 > 支持 Chrome / 兼容 Chromium 内核的浏览器（Edge 等）。
+
+
 
 ---
 
@@ -91,14 +93,26 @@ TRAE 的用量数据来自 `get_session_usage` 接口，它返回的是**某个�
 - **汇总卡片**：今日 / 本周 / 本月 的 Token 总量、积分消耗、缓存命中率等关键指标；
 - **14 天趋势图**：直观看到用量随时间的变化；
 - **模型分布**：你都在用哪些模型（如 GLM、DeepSeek 等），各自占比；
-- **最近记录**：最近采集到的用量明细，每条带**真实会话时间**；
-- **诊断 Tab**：发起 AI 诊断 + 查看诊断历史。
+- **最近记录 / 会话级明细**：每条用量明细都带**真实会话时间**，以及一枚**缓存命中率徽标 ♻NN%**（按 `缓存 / (输入 + 缓存)` 计算，≥50% 绿、≥20% 琥珀、更低红色），一眼看出哪次对话最依赖缓存；
+- **诊断 Tab**：发起 AI 诊断 + 查看诊断历史；
+- **底部工具条**（弹框右下角）：
+  - **全屏**：在新标签页打开同一仪表盘，绕过 Chrome 弹框约 600px 的高度上限（弹框 UI 本身无法突破该浏览器硬限制）；
+  - **浮窗**：在 [www.trae.cn](http://www.trae.cn) 页面内显示 / 隐藏一个常驻的用量浮层；
+  - **设置**：打开扩展设置页（后端地址、API Key、云端同步等）。
 
 ### 4.2 Token 自动采集
 
-- **无需任何配置**：只要扩展已加载、且你在 work.trae.cn 上活动，采集就在后台进行。
+- **无需任何配置**：只要扩展已加载、且你在 [www.trae.cn](http://www.trae.cn) 上活动，采集就在后台进行。
 - **采集内容**：输入 Token、输出 Token、缓存读取 Token、缓存写入 Token、总 Token、积分（credits）、费用（cost_money）、模型名、提问预览（user_input_preview）。
-- **采集来源**：扩展以 MAIN WORLD 注入方式拦截页面的 `fetch` / `XMLHttpRequest` / `EventSource` / `WebSocket`，从响应体中解析用量字段（兼容 TRAE 的 `extra_info.input_token` 等真实字段结构）。
+- **采集来源**：扩展以 MAIN WORLD 注入方式拦截页面的 `fetch` / `XMLHttpRequest` / `EventSource` / `WebSocket`，从响应体中解析用量字段（兼容 TRAE 的 `extra_info.input_token` 等真实字段结构）；扩展对所有 `*.trae.cn` 子域（含 `www.trae.cn`、`api.trae.cn`）生效，由 `manifest.json` 的 `content_scripts.matches` 控制。
+- **主动增量拉取**：用户一进入 www.trae.cn（顶层页面），扩展默认在约 1.5s 后主动调用「用量明细」批量接口 `https://api.trae.cn/trae/api/v1/pay/query_user_usage_group_by_session`，**增量**拉取用量并写入账本，无需逐会话翻看；该接口每条记录自带真实 `usage_time`，时间归因直接用真实发生时刻，比逐会话 `get_session_usage`（无时间字段、需 snowflake 反推）更准确、更完整。要点：
+  - **增量续拉（防重复请求）**：首次进入拉**最近 30 天**；之后把「上次成功拉取覆盖到的时间上界」持久化到 `localStorage`（`__ttw_bulk_last_end__`），每次进站点只拉 `[上次边界, 当前时刻]` 这段增量，不再全量重拉——避免短时间高频请求被服务端限流 / 拉黑。
+  - **边界推进条件**：仅当整段增量完整翻到末页时，才把边界推进到当前时刻；若中途某页失败，保留旧边界、下次续拉该段（按 `session_id` 去重，重复入库安全）。
+  - **串行 + 限频**：逐页**串行**请求（每页间隔 300ms），直到覆盖到上次时间边界（末页不足一页 / 整页早于窗口下界即停）；距上次成功增量 **< 60s** 时自动跳过本次自动拉取（冷却），防止刷新 / 重开页面造成的请求轰炸。
+  - **鉴权自动捕获**：接口需要 `authorization: Cloud-IDE-JWT <jwt>` 头。扩展在 `XMLHttpRequest.setRequestHeader` 处机会性抓取页面任意请求的该 JWT（登录后几乎所有 API 请求都带它），持久化到 `localStorage`（`BULK_AUTH_KEY`，带过期检查）并在重放时注入——无需你手动配置 token；
+  - **参数对齐服务端**：`page_size` 沿用页面真实值（约 20），不强制放大。曾因传 `page_size=100` 触发服务端上限校验返回 `code 9004「订单参数错误」`，已修复；
+  - **分页上限**：最多翻 100 页（约 2000 条）；
+  - **去重**：批量数据标记为 `bulk-usage` 并 `skipRefill`，直接采用权威 `usage_time`，不再反推 / 补拉会话详情，避免海量冗余请求。
 - **时间归因**：如前所述，记录会归到会话真实发生日，而非采集时刻。
 - **工具栏角标**：部分模式下工具栏图标会显示用量角标，便于快速感知。
 
@@ -154,7 +168,7 @@ TRAE 的用量数据来自 `get_session_usage` 接口，它返回的是**某个�
 extension/                    # Chrome 扩展（MV3）
 ├── manifest.json             # 配置：双内容脚本 + 权限
 ├── content/
-│   ├── inject.js             # 主世界：拦截 fetch/XHR/EventSource/WebSocket，提取 token 用量 + 时间归因 + 去重
+│   ├── inject.js             # 主世界：拦截 fetch/XHR/EventSource/WebSocket，提取 token 用量 + 时间归因 + 去重 + 主动批量拉取(query_user_usage_group_by_session)
 │   └── content.js            # 隔离世界：中转消息到 background
 ├── background/
 │   └── background.js         # Service Worker：存储 + 消息路由 + badge + 诊断入口
@@ -185,7 +199,7 @@ worker/                       # Cloudflare Workers 后端（可选，自部署�
 ## 六、数据流
 
 ```
-work.trae.cn 页面
+www.trae.cn 页面
     │ fetch / XHR / EventSource / WebSocket 响应
     ▼
 inject.js (主世界拦截)
@@ -209,14 +223,14 @@ inject.js (主世界拦截)
 
 ## 七、技术选型
 
-| 层 | 技术 | 说明 |
-|---|---|---|
-| 采集 | Content Script (MAIN world) | document_start 注入，覆盖 fetch/XHR/EventSource/WebSocket |
-| 存储 | IndexedDB | 本地优先，用量数据不上传 |
-| 前端 | 原生 HTML/CSS/JS（popup） | 暗色主题，零框架依赖 |
-| 后端（可选） | Cloudflare Workers + D1 + KV | 身份认证 + Star 校验 + 诊断转发 |
-| 诊断 A | DeepSeek API（后端转发） | Star 用户免费，限 10 次/天，结果缓存 1h |
-| 诊断 B | DeepSeek API（直连） | 用户自带 Key，不限次数，无后端 |
+| 层      | 技术                           | 说明                                                   |
+| ------ | ---------------------------- | ---------------------------------------------------- |
+| 采集     | Content Script (MAIN world)  | document_start 注入，覆盖 fetch/XHR/EventSource/WebSocket |
+| 存储     | IndexedDB                    | 本地优先，用量数据不上传                                         |
+| 前端     | 原生 HTML/CSS/JS（popup）        | 暗色主题，零框架依赖                                           |
+| 后端（可选） | Cloudflare Workers + D1 + KV | 身份认证 + Star 校验 + 诊断转发                                |
+| 诊断 A   | DeepSeek API（后端转发）           | Star 用户免费，限 10 次/天，结果缓存 1h                           |
+| 诊断 B   | DeepSeek API（直连）             | 用户自带 Key，不限次数，无后端                                    |
 
 ---
 
@@ -234,11 +248,12 @@ inject.js (主世界拦截)
 
 ### 8.1 创建 GitHub OAuth App
 
-- 访问 https://github.com/settings/developers → New OAuth App
+- 访问 <https://github.com/settings/developers> → New OAuth App
 - **Authorization callback URL** 填：`https://<你的-worker-域名>/auth/callback`
 - 记下 Client ID 和 Client Secret
 
 > ⚠️ **自部署必须** 用 `npm run secret:github-id` 和 `npm run secret:github-secret` 把它们配置成 Worker Secrets。
+>
 > 漏配会导致登录时跳转到 `https://github.com/login/oauth/authorize?client_id=undefined` 并返回 404。
 
 ### 8.2 创建 Cloudflare 资源
@@ -321,23 +336,27 @@ Worker → 302 → chrome-extension://${extId}/callback.html#token=...
 
 ### 采集 / 时间 / 历史相关
 
-| 现象 | 原因 | 解决 |
-|---|---|---|
-| 今日用量被「翻看历史会话」虚增 | 旧版本把采集时刻当用量时间 | 升级到含「时间归因」的版本；旧的错误数据需清空重采校正 |
-| 历史记录显示的时间是「今天」而非真实发生日 | 该会话的真实时间未被捕获，回退到了采集时刻 | 确认使用最新版；最新版已用 `session_id` 反推兜底，覆盖绝大多数情况 |
-| 同一会话出现多条重复记录 | 未启用按会话去重（旧版） | 最新版默认按 `session_id` 覆盖去重，重采后自动合并 |
-| 想彻底重置数据 | —— | 扩展设置 →「清空记录」 |
+| 现象                        | 原因                                         | 解决                                                                                     |
+| ------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| 今日用量被「翻看历史会话」虚增           | 旧版本把采集时刻当用量时间                              | 升级到含「时间归因」的版本；旧的错误数据需清空重采校正                                                            |
+| 历史记录显示的时间是「今天」而非真实发生日     | 该会话的真实时间未被捕获，回退到了采集时刻                      | 确认使用最新版；最新版已用 `session_id` 反推兜底，覆盖绝大多数情况                                               |
+| 同一会话出现多条重复记录              | 未启用按会话去重（旧版）                               | 最新版默认按 `session_id` 覆盖去重，重采后自动合并                                                       |
+| 想彻底重置数据                   | ——                                         | 扩展设置 →「清空记录」                                                                           |
+| 主动拉取报 `401`               | JWT 未捕获或已过期（扩展刚加载、尚未抓到页面的 `Cloud-IDE-JWT`） | 重新加载扩展后再刷新一次 [www.trae.cn](http://www.trae.cn) 页面，让扩展捕获到带鉴权头的请求；token 会自动持久化复用         |
+| 主动拉取报 `code 9004「订单参数错误」` | 曾因 `page_size=100` 触发服务端上限校验               | 当前版本已沿用页面真实 `page_size`（约 20）；若仍出现，请在控制台贴 `[bulk] 探测 POST ... → status=...` 日志及响应体     |
+| 主动拉取 `404`                | 把相对接口路径拼到了 `www.trae.cn` 而非真实 host         | 当前版本已固定为 `api.trae.cn` 绝对路径；若仍 404，确认访问的是 `*.trae.cn` 站点（扩展只对 `*.trae.cn` 生效）          |
+| 进入站点后完全没有自动拉取日志           | 未命中顶层 frame 或扩展未注入                         | 确认扩展已启用、访问的是 [www.trae.cn](http://www.trae.cn) 顶层页面，并查看控制台是否出现 `[bulk] 已调度主动拉取最近 30 天` |
 
 ### 登录 / 后端相关
 
-| 现象 | 原因 | 解决 |
-|---|---|---|
+| 现象                                | 原因                                                            | 解决                                                                          |
+| --------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | 登录跳转到 `client_id=undefined` 后 404 | Worker 没配置 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` secret | `cd worker && npm run secret:github-id`、`npm run secret:github-secret` 重新设置 |
-| 登录后报「Worker 未配置 ...」 | 同上，secret 未生效 | 重新 `wrangler secret put`，并用 `wrangler secret list` 确认 |
-| 已 Star 但诊断报 403 | KV 绑定名错误，Star 缓存写不进 | 检查 `wrangler.toml` 中 KV `binding = "KV"`，重新 `wrangler deploy` |
-| OAuth 回调报 `redirect_uri mismatch` | GitHub OAuth App 的 callback URL 与 Worker 域名不一致 | 去 GitHub OAuth App 设置改为 `https://<worker域名>/auth/callback` |
-| 扩展点登录没反应（默认模式） | 官方 Worker 临时不可达 | 等待恢复，或在「高级」里临时切到自部署 |
-| 扩展点登录没反应（自部署模式） | 自部署 Worker 未部署或地址填错 | 检查 Worker 状态与填入的 API 地址 |
+| 登录后报「Worker 未配置 ...」              | 同上，secret 未生效                                                 | 重新 `wrangler secret put`，并用 `wrangler secret list` 确认                       |
+| 已 Star 但诊断报 403                   | KV 绑定名错误，Star 缓存写不进                                           | 检查 `wrangler.toml` 中 KV `binding = "KV"`，重新 `wrangler deploy`               |
+| OAuth 回调报 `redirect_uri mismatch` | GitHub OAuth App 的 callback URL 与 Worker 域名不一致                | 去 GitHub OAuth App 设置改为 `https://<worker域名>/auth/callback`                  |
+| 扩展点登录没反应（默认模式）                    | 官方 Worker 临时不可达                                               | 等待恢复，或在「高级」里临时切到自部署                                                         |
+| 扩展点登录没反应（自部署模式）                   | 自部署 Worker 未部署或地址填错                                           | 检查 Worker 状态与填入的 API 地址                                                     |
 
 ---
 

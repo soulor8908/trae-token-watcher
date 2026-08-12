@@ -204,7 +204,7 @@ function rowToClient(r) {
 
 function str(v) { return v == null ? null : String(v).slice(0, 2000); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0; }
-function flo(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function flo(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, n) : 0; }
 function nowSec() { return Math.floor(Date.now() / 1000); }
 
 function json(data, status = 200) {

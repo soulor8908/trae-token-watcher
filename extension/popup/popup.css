@@ -19,8 +19,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  width: 380px;
-  max-height: 600px;
+  width: 460px;
+  max-height: 1100px;
   overflow-y: auto;
   background: var(--bg);
   color: var(--ink);
@@ -30,6 +30,14 @@ body {
 }
 
 .app { padding: 16px; }
+
+/* 全屏模式：从新标签页打开（?full=1），解除 Chrome 弹框 ~600px 高度上限 */
+body.full-mode {
+  width: 100%;
+  max-height: none;
+  overflow-y: auto;
+}
+body.full-mode .app { max-width: 560px; margin: 0 auto; }
 
 /* Header */
 .header {
@@ -530,6 +538,9 @@ body {
 .sess-stats .tok.out { color: var(--accent2); }
 .sess-stats .tok.total { color: var(--ink); font-weight: 700; }
 .sess-stats .tok.credits { color: #d69e2e; }
+.sess-stats .tok.cache-rate.hi { color: var(--accent); }
+.sess-stats .tok.cache-rate.mid { color: var(--amber); }
+.sess-stats .tok.cache-rate.lo { color: var(--red); }
 
 /* ===== 诊断模式切换 ===== */
 .diag-mode-toggle {
@@ -1115,7 +1126,7 @@ body {
   flex-shrink: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  max-width: 150px;
+  max-width: 205px;
 }
 .record-tokens .tok {
   font-family: var(--font-mono);
@@ -1130,6 +1141,9 @@ body {
 .record-tokens .tok.credits { color: #d69e2e; font-weight: 600; }
 .record-tokens .tok.cost { color: #ed8936; }
 .record-tokens .tok.remain { color: var(--amber); }
+.record-tokens .tok.cache-rate.hi { color: var(--accent); }
+.record-tokens .tok.cache-rate.mid { color: var(--amber); }
+.record-tokens .tok.cache-rate.lo { color: var(--red); }
 .record-tokens .sep { color: var(--muted2); }
 .detail-v.preview { color: var(--ink); font-style: italic; }
 
@@ -1147,6 +1161,7 @@ body {
 .src-header { background: #27d98b22; color: var(--accent); }
 .src-body { background: #62a8ff22; color: var(--accent2); }
 .src-ws { background: #b794f622; color: var(--purple); }
+.src-bulk { background: #e6a23c22; color: var(--amber); }
 .src-other { background: var(--bg3); color: var(--muted2); }
 
 /* 展开详情 */

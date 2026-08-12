@@ -1,6 +1,6 @@
 // Background Service Worker — 数据写入中枢 + 消息路由 + 预警检查 + 自动同步
 // 失败优雅：所有写入均 try/catch，不影响页面正常运行
-import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, checkAlert } from '../lib/db.js';
+import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, countRecordsSince, checkAlert } from '../lib/db.js';
 import { sync, pull, push, getAutoSyncEnabled, canSync, resetLocalCursor } from '../lib/sync.js';
 
 const ALERT_ALARM = 'ttw-alert-check';
@@ -62,7 +62,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     case 'TTW_OAUTH_START':
       // 扩展即将打开 OAuth 登录标签页，开始监听 /auth/done 回调
-      awaitingOAuthCallback = true;
+      // 持久化到 storage：SW 被杀后仍能识别回调（内存布尔会在 SW 重启时丢失）
+      chrome.storage.local.set({ ttw_awaiting_oauth: true });
       return false;
   }
 });
@@ -71,10 +72,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Worker 不再 302 到 chrome-extension://（Chrome 禁止网页导航到扩展 URL）
 // 而是 302 到 Worker 自己的 /auth/done?token=... 页面
 // 扩展 background 通过 chrome.tabs.onUpdated 检测此 URL，提取 token
-let awaitingOAuthCallback = false;
-
+// 监听标志持久化在 storage（ttw_awaiting_oauth），避免 SW 重启丢状态导致登录静默失败
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (!awaitingOAuthCallback) return;
+  const { ttw_awaiting_oauth: awaiting } = await chrome.storage.local.get('ttw_awaiting_oauth');
+  if (!awaiting) return;
   const url = changeInfo.url || tab?.url;
   if (!url) return;
 
@@ -84,7 +85,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const token = urlObj.searchParams.get('token');
     if (!token) return;
 
-    awaitingOAuthCallback = false;
+    await chrome.storage.local.remove('ttw_awaiting_oauth');
     await chrome.storage.local.set({
       ttw_session: {
         token,
@@ -147,11 +148,13 @@ async function handleUsage(payload, sender) {
       ...(payload.credits != null ? { credits: payload.credits } : {}),
       ...(payload.costMoney != null ? { costMoney: payload.costMoney } : {}),
       ...(payload.amount != null ? { amount: payload.amount } : {}),
+      ...(payload.usageSource != null ? { usageSource: payload.usageSource } : {}),
       ...(payload.userInputPreview != null ? { userInputPreview: payload.userInputPreview } : {}),
     });
     refreshBadge();
     console.log('[trae-token-watcher] 记录:', payload.source, payload.totalTokens, 'tokens |', payload.model, '|', payload.url);
     scheduleDebouncedSync();
+    runAlertCheck(); // 写入后顺带检查预警（内部自带冷却，不会重复通知）
   } catch (e) {
     console.warn('[trae-token-watcher] 写入失败', e);
   }
@@ -160,8 +163,8 @@ async function handleUsage(payload, sender) {
 // 更新扩展图标 badge：显示今日请求数，预警时变红
 async function refreshBadge() {
   try {
-    const records = await getRecordsSince(startOfDay(Date.now()));
-    const count = records.length;
+    // 仅取计数（用索引 count），避免每次写入都加载当天全部记录
+    const count = await countRecordsSince(startOfDay(Date.now()));
     const text = count > 0 ? String(count > 999 ? '999+' : count) : '';
     chrome.action.setBadgeText({ text });
 
@@ -257,10 +260,3 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     runAutoSync();
   }
 });
-
-// 每次写入数据后也触发预警检查（带冷却保护，不会重复发通知）
-const _origHandleUsage = handleUsage;
-handleUsage = async function (payload, sender) {
-  await _origHandleUsage(payload, sender);
-  runAlertCheck();
-};

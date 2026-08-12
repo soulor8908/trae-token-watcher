@@ -6,8 +6,12 @@ const DB_VERSION = 3;
 const STORE_RECORDS = 'usage-records';
 const STORE_DIAGNOSES = 'diagnoses';
 
+let _dbPromise = null;
+
+// 单例连接：IndexedDB 打开是异步且有开销，复用同一个连接，避免每次读写都 open/close
 function openDB() {
-  return new Promise((resolve, reject) => {
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
@@ -53,8 +57,12 @@ function openDB() {
       }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      _dbPromise = null; // 打开失败则下次重试
+      reject(req.error);
+    };
   });
+  return _dbPromise;
 }
 
 // 生成客户端记录 ID（用于跨设备去重）
@@ -91,7 +99,10 @@ export async function addRecord(record) {
 
     const tryInsert = () => {
       const req = store.add(finalRecord);
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        _predictCache = { ts: 0, data: null }; // 数据已变，使预测缓存失效
+        resolve(req.result);
+      };
       req.onerror = () => reject(req.error);
     };
 
@@ -115,7 +126,7 @@ export async function addRecord(record) {
     }
 
     tx.onerror = () => reject(tx.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -130,7 +141,21 @@ export async function getRecordsSince(since = 0) {
     const req = idx.getAll(range);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
+  });
+}
+
+// 统计指定时间之后的记录数（用 timestamp 索引的 count，避免一次性加载全部记录）
+export async function countRecordsSince(since = 0) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    const idx = store.index('timestamp');
+    const range = IDBKeyRange.lowerBound(since);
+    const req = idx.count(range);
+    req.onsuccess = () => resolve(req.result || 0);
+    req.onerror = () => reject(req.error);
   });
 }
 
@@ -150,7 +175,6 @@ export async function getAllRecords(limit = 500) {
       }
     };
     tx.oncomplete = () => {
-      db.close();
       resolve(results);
     };
     tx.onerror = () => reject(tx.error);
@@ -337,13 +361,24 @@ export async function getDistinctModels() {
 
 // 用量预测：基于历史趋势预测未来 7/30 天消耗
 // 算法：加权移动平均（最近 7 天权重递减），结合趋势修正
+// predictUsage 较昂贵（加载近 14 天记录），而 handleUsage 每条写入都会触发它。
+// 用 60s TTL 缓存最终结果，高频写入时避免反复全量加载。数据即使滞后 60s 对
+// 日/月级预警阈值也无影响。
+let _predictCache = { ts: 0, data: null };
+const PREDICT_TTL_MS = 60000;
+
 export async function predictUsage() {
   const now = Date.now();
+  if (_predictCache.data && now - _predictCache.ts < PREDICT_TTL_MS) {
+    return _predictCache.data;
+  }
   const dayMs = 86400000;
   const records = await getRecordsSince(now - 14 * dayMs); // 取近 14 天
 
   if (records.length === 0) {
-    return { available: false, reason: '暂无历史数据' };
+    const res = { available: false, reason: '暂无历史数据' };
+    _predictCache = { ts: now, data: res };
+    return res;
   }
 
   // 按天聚合（最近 14 天）
@@ -364,7 +399,9 @@ export async function predictUsage() {
   const days = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
   if (days.length === 0) {
-    return { available: false, reason: '近 14 天无数据' };
+    const res = { available: false, reason: '近 14 天无数据' };
+    _predictCache = { ts: now, data: res };
+    return res;
   }
 
   // 加权移动平均：最近的天权重最高
@@ -411,7 +448,7 @@ export async function predictUsage() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const todayData = days.find((d) => d.date === todayKey) || { tokens: 0, credits: 0, count: 0 };
 
-  return {
+  const result = {
     available: true,
     avgDailyTokens: Math.round(avgDailyTokens),
     avgDailyCredits: parseFloat(avgDailyCredits.toFixed(2)),
@@ -435,6 +472,8 @@ export async function predictUsage() {
     },
     historyDays: n,
   };
+  _predictCache = { ts: now, data: result };
+  return result;
 }
 
 // 预警检查：对比今日用量与阈值
@@ -549,7 +588,7 @@ export async function clearAllRecords() {
     const req = store.clear();
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -579,7 +618,7 @@ export async function addDiagnosis(record) {
     });
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -599,7 +638,6 @@ export async function getDiagnoses(limit = 50) {
       }
     };
     tx.oncomplete = () => {
-      db.close();
       resolve(results);
     };
     tx.onerror = () => reject(tx.error);
@@ -615,7 +653,7 @@ export async function getDiagnosisById(id) {
     const req = store.get(id);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -628,7 +666,7 @@ export async function deleteDiagnosis(id) {
     const req = store.delete(id);
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -641,7 +679,7 @@ export async function clearDiagnoses() {
     const req = store.clear();
     req.onsuccess = () => resolve(true);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -654,7 +692,7 @@ export async function countDiagnoses() {
     const req = store.count();
     req.onsuccess = () => resolve(req.result || 0);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -669,7 +707,7 @@ export async function getRecordsAfterId(localId = 0, limit = 500) {
     const req = store.getAll(range, limit);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -684,11 +722,18 @@ export async function importRecords(records) {
     const idx = store.index('clientId');
     let imported = 0;
     let skipped = 0;
-    let pending = records.length;
+
+    // 事务顶层一次性解析：无论有无 IDB 请求（全 skipped 时事务为空也会 oncomplete），
+    // 都能在事务结束时拿到最终计数。避免按 pending 计数在循环内赋值 oncomplete 导致挂起。
+    tx.oncomplete = () => {
+      _predictCache = { ts: 0, data: null }; // 批量导入改变数据，使预测缓存失效
+      resolve({ imported, skipped });
+    };
+    tx.onerror = () => reject(tx.error);
 
     for (const r of records) {
       const cid = r.clientId || r.client_id;
-      if (!cid) { skipped++; pending--; continue; }
+      if (!cid) { skipped++; continue; }
       const checkReq = idx.getKey(cid);
       checkReq.onsuccess = () => {
         if (checkReq.result == null) {
@@ -714,22 +759,9 @@ export async function importRecords(records) {
         } else {
           skipped++;
         }
-        pending--;
-        if (pending === 0) {
-          tx.oncomplete = () => { db.close(); resolve({ imported, skipped }); };
-        }
       };
-      checkReq.onerror = () => {
-        skipped++;
-        pending--;
-        if (pending === 0) {
-          tx.oncomplete = () => { db.close(); resolve({ imported, skipped }); };
-        }
-      };
+      checkReq.onerror = () => { skipped++; };
     }
-
-    // 兜底：如果没有 pending（空数组已在前面 return）
-    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -742,7 +774,7 @@ export async function countAllRecords() {
     const req = store.count();
     req.onsuccess = () => resolve(req.result || 0);
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 
@@ -758,7 +790,7 @@ export async function getMaxLocalId() {
       resolve(cursor ? cursor.value.id : 0);
     };
     req.onerror = () => reject(req.error);
-    tx.oncomplete = () => db.close();
+    // 复用单例连接，事务结束不关闭
   });
 }
 

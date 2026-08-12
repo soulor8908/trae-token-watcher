@@ -72,32 +72,74 @@ export async function handleDiagnose(request, env, session) {
   });
 }
 
-// 调用 DeepSeek API
-async function callDeepSeek(env, stats) {
-  const resp = await fetch(DEEPSEEK_API, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: stats },
-      ],
-      temperature: 0.7,
-      max_tokens: 1200,
-    }),
-  });
+const DEEPSEEK_TIMEOUT_MS = 15000; // 单次请求超时
+const DEEPSEEK_MAX_RETRIES = 2;    // 超时 / 5xx 重试次数
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw httpError(502, `DeepSeek API 错误 ${resp.status}: ${errText.slice(0, 200)}`);
+// fetch 带超时：超时后 abort，避免 Worker 被挂起的下游请求拖死
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ac.signal });
+  } finally {
+    clearTimeout(timer);
   }
+}
 
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || '诊断完成，但未返回内容';
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 调用 DeepSeek API（带超时 + 有限重试）
+// 仅对「网络错误 / 超时 / 5xx」重试；4xx（含 401/429）视为终态，直接报错不重试
+async function callDeepSeek(env, stats) {
+  let lastErr;
+  for (let attempt = 0; attempt <= DEEPSEEK_MAX_RETRIES; attempt++) {
+    try {
+      const resp = await fetchWithTimeout(DEEPSEEK_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: stats },
+          ],
+          temperature: 0.7,
+          max_tokens: 1200,
+        }),
+      }, DEEPSEEK_TIMEOUT_MS);
+
+      if (!resp.ok) {
+        // 5xx 瞬时错误：重试；4xx 终态：直接报错
+        if (resp.status >= 500 && attempt < DEEPSEEK_MAX_RETRIES) {
+          lastErr = new Error(`DeepSeek 5xx ${resp.status}`);
+          await sleep(300 * (attempt + 1));
+          continue;
+        }
+        const errText = await resp.text();
+        throw httpError(502, `DeepSeek API 错误 ${resp.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content || '诊断完成，但未返回内容';
+    } catch (e) {
+      // 已构造的 HTTP 错误（上面 throw 的 httpError，带 status）直接上抛，不重试
+      if (e && e.status) throw e;
+      // 其余（AbortError / 网络异常）可重试
+      if (attempt < DEEPSEEK_MAX_RETRIES) {
+        lastErr = e;
+        await sleep(300 * (attempt + 1));
+        continue;
+      }
+      lastErr = e;
+      break;
+    }
+  }
+  throw httpError(502, `DeepSeek 调用失败: ${lastErr?.message || '未知错误'}`);
 }
 
 async function sha256(text) {

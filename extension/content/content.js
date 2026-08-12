@@ -82,6 +82,12 @@
     return m.length > 22 ? m.slice(0, 22) + '…' : m;
   }
 
+  function startOfDay(ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
   async function initWidget() {
     if (!isContextValid()) return;
     try {
@@ -136,6 +142,7 @@
           <span class="dot"></span>
           <span class="title">Token Watcher</span>
           <span class="spacer"></span>
+          <button class="btn-full" id="btnFull" title="全屏面板">⤢</button>
           <button class="btn-min" id="btnMin" title="收起">−</button>
           <button class="btn-close" id="btnClose" title="关闭浮窗">×</button>
         </div>
@@ -205,12 +212,13 @@
       color: #9ca3af; letter-spacing: 0.3px;
     }
     .spacer { flex: 1; }
-    .btn-min, .btn-close {
+    .btn-full, .btn-min, .btn-close {
       background: none; border: none; color: #6b7280;
       font-size: 14px; cursor: pointer; padding: 0 2px;
       line-height: 1; transition: color 0.15s;
     }
-    .btn-min:hover, .btn-close:hover { color: #e8eaed; }
+    .btn-full { font-size: 13px; }
+    .btn-full:hover, .btn-min:hover, .btn-close:hover { color: #e8eaed; }
 
     .body { padding: 10px 12px; }
 
@@ -271,6 +279,14 @@
     const $ = (id) => widgetShadow.getElementById(id);
     const widget = $('widget');
     const header = $('header');
+
+    // 全屏：在新标签页打开完整面板（与 popup 全屏逻辑一致，绕过浮窗尺寸限制）
+    $('btnFull').addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') + '?full=1' });
+      } catch (_) {}
+    });
 
     // 收起 / 展开
     $('btnMin').addEventListener('click', (e) => {
@@ -359,6 +375,17 @@
   // 实时更新：inject.js 捕获到新用量时立即调用
   function updateWidgetWithUsage(payload) {
     if (!widgetHost) return;
+
+    // 只统计「今日」用量：批量导入/查看历史会话得到的用量（usage_time 在过去，
+    // isHistorical=true）若真实发生时刻不在今天，不应计入今日 Token，否则浮窗会被
+    // 整段历史数据虚增（等于统计了所有采集到的数据）。实时用量（isHistorical=false）
+    // 发生在当下，始终计入今日。
+    if (payload.isHistorical) {
+      const ts = (typeof payload.timestamp === 'number' && payload.timestamp > 0)
+        ? payload.timestamp
+        : (payload.collectedAt || 0);
+      if (ts < startOfDay(Date.now())) return;
+    }
 
     todayData.total += payload.totalTokens || 0;
     todayData.input += payload.inputTokens || 0;
