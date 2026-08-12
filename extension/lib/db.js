@@ -2,13 +2,13 @@
 // 数据流要短：content -> background -> IndexedDB；popup 直读 IndexedDB
 
 const DB_NAME = 'trae-token-watcher';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_RECORDS = 'usage-records';
 const STORE_DIAGNOSES = 'diagnoses';
 
 // getSummary 只加载近 N 天记录（覆盖月桶 + 14 天趋势），走 timestamp 索引范围查询，
 // 避免每次刷新都 getAllRecords(2000) 全量扫描，降低 IDB 与主线程负载。
-const SUMMARY_WINDOW_DAYS = 31;
+const SUMMARY_WINDOW_DAYS = 31;  // 历史取数已改为全量(getRecordsSince(0))，此常量保留供趋势/未来窗口配置参考，不再用于取数截断
 
 let _dbPromise = null;
 
@@ -30,6 +30,7 @@ function openDB() {
         store.createIndex('conversationId', 'conversationId', { unique: false });
         store.createIndex('model', 'model', { unique: false });
         store.createIndex('clientId', 'clientId', { unique: false });
+        store.createIndex('serverCreatedAt', 'serverCreatedAt', { unique: false });
       } else if (e.oldVersion < 2) {
         // v1 → v2：补 clientId 索引 + 给旧记录回填 clientId
         const store = e.target.transaction.objectStore(STORE_RECORDS);
@@ -58,6 +59,14 @@ function openDB() {
           autoIncrement: true,
         });
         dstore.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+
+      // v3 → v4：补 serverCreatedAt 索引，支撑按「本地最新记录时间」做增量拉取水位线
+      if (e.oldVersion < 4 && db.objectStoreNames.contains(STORE_RECORDS)) {
+        const store = e.target.transaction.objectStore(STORE_RECORDS);
+        if (!store.indexNames.contains('serverCreatedAt')) {
+          store.createIndex('serverCreatedAt', 'serverCreatedAt', { unique: false });
+        }
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -189,9 +198,13 @@ export async function getAllRecords(limit = 500) {
 export async function getSummary() {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
-  // 仅取近 SUMMARY_WINDOW_DAYS 天（索引范围查询），覆盖月桶与 14 天趋势所需数据，
-  // 不再全量加载 2000 条，popup 每 5s 刷新时显著降负载。
-  const records = await getRecordsSince(now - SUMMARY_WINDOW_DAYS * dayMs);
+  // 取全量记录：用索引范围查询（下限 0 = 全表，不被 2000 截断），覆盖全部历史。
+  // 这样 all / bySession / byModel 聚合的是真实全量；趋势图展示时仍 slice(-14)，
+  // 月桶用自然月起点（startOfMonth）。性能由事件驱动刷新(ttw_usage_ping) + 并发守卫
+  // + 15s 兜底保证，不再每 5s 无脑全量。
+  // 关键点：不能用「近 N 天」窗口取数——否则清空本地、从云端恢复的历史（大多 >31 天）
+  // 会被挡在 popup 视图外，造成「数据都没了」的误判（本就是上一轮的回归）。
+  const records = await getRecordsSince(0);
 
   const buckets = {
     today: { since: startOfDay(now), input: 0, output: 0, cached: 0, total: 0, count: 0, credits: 0, costMoney: 0 },
@@ -596,6 +609,48 @@ export async function clearAllRecords() {
   });
 }
 
+// 本地记录中最大的服务端接收时间（增量拉取水位线；无记录或索引缺失返回 0 → 下次全量拉取）
+export async function getMaxServerCreatedAt() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    if (!store.indexNames.contains('serverCreatedAt')) {
+      resolve(0);
+      return;
+    }
+    const idx = store.index('serverCreatedAt');
+    const req = idx.openCursor(null, 'prev'); // 倒序，第一条即最大值
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      resolve(cursor ? (cursor.value.serverCreatedAt || 0) : 0);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 本地记录中最大的真实用量时间（批量增量拉取水位线；无记录或索引缺失返回 0 → 下次全量首拉）。
+// 取 timestamp 索引倒序第一条即最大值。清空本地数据后库为空 → 返回 0 → 自动全量首拉，
+// 彻底摆脱「上一次获取时间」类易失游标（原 BULK_LAST_END_KEY 已废弃）。
+export async function getMaxUsageTime() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_RECORDS);
+    if (!store.indexNames.contains('timestamp')) {
+      resolve(0);
+      return;
+    }
+    const idx = store.index('timestamp');
+    const req = idx.openCursor(null, 'prev'); // 倒序，第一条即最大值
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      resolve(cursor ? (cursor.value.timestamp || 0) : 0);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 // ---------- 诊断历史 ----------
 // 诊断结果持久化，便于回看历史诊断数据。
 // record 字段：
@@ -754,6 +809,7 @@ export async function importRecords(records) {
             url: r.url || '',
             source: r.source || 'sync',
             clientId: cid,
+            serverCreatedAt: r.server_created_at || 0, // 服务端接收时间，用于增量拉取水位线
             ...(r.remaining != null ? { remaining: r.remaining } : {}),
             ...(r.credits != null ? { credits: r.credits } : {}),
             ...(r.costMoney != null ? { costMoney: r.costMoney } : {}),

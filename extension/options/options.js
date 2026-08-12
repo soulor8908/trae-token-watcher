@@ -352,6 +352,17 @@ async function clearLocalData() {
   // 重置同步游标，让下次能全量从云端拉取
   await resetLocalCursor();
   setSyncHint('本地数据已清空，同步游标已重置');
+  // 清空后立即尝试从云端恢复（仅 pull），无需手动点同步即可拿回历史数据，
+  // 也避免「清空后自动同步未被触发」导致数据看似丢失。
+  try {
+    const st = await getStatus();
+    if (st.canSync) {
+      await pull();
+      setSyncHint('本地数据已清空，已从云端恢复历史记录');
+    }
+  } catch (e) {
+    setSyncHint('本地数据已清空；云端恢复失败：' + e.message);
+  }
   await refreshSyncUI();
 }
 

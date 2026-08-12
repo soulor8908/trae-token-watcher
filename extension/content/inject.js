@@ -951,17 +951,33 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
   ];
 
   // ---------- 增量串行拉取：记录上次拉取边界，避免重复全量请求被拉黑 ----------
-  const BULK_LAST_END_KEY = '__ttw_bulk_last_end__'; // 上次成功增量拉取覆盖到的时间上界（秒）
   const BULK_PAGE_DELAY_MS = 300;   // 每页之间串行延时，降低请求频率
-  const BULK_MIN_INTERVAL_SEC = 60; // 距上次成功增量 < 60s 则本次自动跳过，防频繁
-  function loadBulkLastEnd() {
-    try { const v = parseInt(localStorage.getItem(BULK_LAST_END_KEY) || '', 10); return Number.isFinite(v) && v > 0 ? v : null; }
-    catch (_) { return null; }
-  }
-  function saveBulkLastEnd(sec) {
-    try { localStorage.setItem(BULK_LAST_END_KEY, String(sec)); } catch (_) {}
-  }
+  const BULK_MIN_INTERVAL_SEC = 60; // 距本地最新用量 < 60s 则本次自动跳过，防频繁
   const delayMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // 向 background 取本地库最新一条真实用量时间（ms），作为增量拉取水位线。
+  // 由 background 读扩展 IndexedDB，清空本地数据后自动归零 → 下次自动全量首拉。
+  // 带 1.5s 超时兜底：拿不到就返回 0（→ 全量首拉），绝不因游标卡死而拿不到数据。
+  function requestMaxUsageTime() {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(typeof v === 'number' && v > 0 ? v : 0); } };
+      const timer = setTimeout(() => finish(0), 1500);
+      try {
+        const p = chrome.runtime.sendMessage({ type: 'TTW_GET_MAX_USAGE_TIME' });
+        if (p && typeof p.then === 'function') {
+          p.then((r) => { clearTimeout(timer); finish(r && typeof r.value === 'number' ? r.value : 0); })
+            .catch(() => { clearTimeout(timer); finish(0); });
+        } else {
+          clearTimeout(timer);
+          finish(0);
+        }
+      } catch (_) {
+        clearTimeout(timer);
+        finish(0);
+      }
+    });
+  }
 
   // ---------- 用量接口自动嗅探 + 真实请求形状捕获 ----------
   const USAGE_SNIFF_RE = /usage|pay|quota|credit|bill|consume|cost|token|finance|charge|fee|balance|stat/i;
@@ -1276,19 +1292,22 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
     bulkLoadRunning = true;
     try {
       const nowSec = Math.floor(Date.now() / 1000);
-      const lastEnd = loadBulkLastEnd();
+      // 水位线取自本地库最新一条真实用量时间（而非「上次获取时间」类易失游标）；
+      // 库为空（如刚清空）→ 0 → 自动全量首拉近 days 天。
+      const dbMaxMs = await requestMaxUsageTime();
+      const dbMaxSec = Math.floor(dbMaxMs / 1000);
       let sinceSec, mode;
-      if (lastEnd) {
-        // 增量：从上次覆盖到的边界之后，拉到当前时刻
-        sinceSec = lastEnd;
+      if (dbMaxSec > 0) {
+        // 增量：从本地最新用量时间之后，拉到当前时刻
+        sinceSec = dbMaxSec;
         mode = '增量';
-        // 冷却：距上次成功增量不足阈值则跳过，防频繁请求被拉黑
-        if (nowSec - lastEnd < BULK_MIN_INTERVAL_SEC) {
-          console.log(TAG, `[bulk] 距上次增量仅 ${nowSec - lastEnd}s（< ${BULK_MIN_INTERVAL_SEC}s），跳过本次自动拉取`);
+        // 冷却：距本地最新用量不足阈值则跳过，防频繁请求被拉黑
+        if (nowSec - dbMaxSec < BULK_MIN_INTERVAL_SEC) {
+          console.log(TAG, `[bulk] 距本地最新用量仅 ${nowSec - dbMaxSec}s（< ${BULK_MIN_INTERVAL_SEC}s），跳过本次自动拉取`);
           return 'cooldown';
         }
       } else {
-        // 首次：拉最近 days 天
+        // 首次/本地为空：拉最近 days 天
         sinceSec = nowSec - days * 86400;
         mode = '首次';
       }
@@ -1317,8 +1336,7 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
               const fu = new URL(target.url.indexOf('http') === 0 ? target.url : location.origin + target.url);
               localStorage.setItem(BULK_PATH_KEY, fu.origin + fu.pathname);
             } catch (_) {}
-            // 仅当整段增量完整拉到末页，才把边界推进到当前时刻；否则保留旧边界，下次续拉
-            if (r.complete) saveBulkLastEnd(untilSec);
+            // 水位线已改为本地库最新用量时间（见上方 sinceSec 计算），无需再持久化边界
             const d0 = new Date(sinceMs).toISOString().slice(0, 10);
             const d1 = new Date(untilMs).toISOString().slice(0, 10);
             console.log(TAG, `[bulk] ${mode}拉取成功（窗口 ${d0} ~ ${d1}）：${target.url}，新增/更新 ${r.count} 条${r.complete ? '' : '（未拉完，下次续拉）'}`);
@@ -1370,11 +1388,10 @@ async function resolveSessionTime(conversationId, fallback, skipRefill) {
     }
   });
 
-  // 启动增量批量拉取：用户一进入站点，增量补齐上次边界→当前时刻的用量
+  // 启动增量批量拉取：用户一进入站点，按「本地库最新用量时间」补齐增量（库空则全量首拉）
   if (window === window.top) {
     scheduleBulkLoad(BULK_DAYS);
-    const le = loadBulkLastEnd();
-    console.log(TAG, `[bulk] 已调度增量批量拉取（host=${location.host}），上次边界=${le ? new Date(le * 1000).toISOString() : '无（首次拉最近 ' + BULK_DAYS + ' 天）'}`);
+    console.log(TAG, `[bulk] 已调度增量批量拉取（host=${location.host}），水位线取自本地库最新用量时间（库空则全量首拉近 ${BULK_DAYS} 天）`);
   } else {
     console.log(TAG, '[bulk] 当前为 iframe 上下文，跳过主动拉取（如需支持请将 iframe 纳入 content_scripts）');
   }

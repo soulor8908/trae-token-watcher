@@ -1,6 +1,6 @@
 // Background Service Worker — 数据写入中枢 + 消息路由 + 预警检查 + 自动同步
 // 失败优雅：所有写入均 try/catch，不影响页面正常运行
-import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, countRecordsSince, checkAlert } from '../lib/db.js';
+import { addRecord, getSummary, getAllRecords, clearAllRecords, getRecordsSince, countRecordsSince, checkAlert, getMaxUsageTime } from '../lib/db.js';
 import { sync, pull, push, getAutoSyncEnabled, canSync, resetLocalCursor } from '../lib/sync.js';
 
 const ALERT_ALARM = 'ttw-alert-check';
@@ -35,6 +35,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       getRecordsSince(startOfDay(Date.now()))
         .then((records) => sendResponse({ records }))
         .catch((e) => sendResponse({ error: String(e) }));
+      return true;
+    case 'TTW_GET_MAX_USAGE_TIME':
+      // 供 inject.js（MAIN world）取本地库最新一条真实用量时间，作为批量增量拉取水位线；
+      // 清空本地数据后库为空 → 返回 0 → inject 自动全量首拉。
+      getMaxUsageTime()
+        .then((value) => sendResponse({ value }))
+        .catch((e) => sendResponse({ value: 0, error: String(e) }));
       return true;
     case 'TTW_WIDGET_INIT':
       getWidgetSummary()

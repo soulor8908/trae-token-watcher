@@ -285,8 +285,10 @@ function renderSessions(bySession, opts = {}) {
     return;
   }
 
-  const oneMonthAgo = Date.now() - SESSION_MONTH_DAYS * 24 * 60 * 60 * 1000;
-  const nextData = bySession.filter((s) => (s.lastActive || 0) >= oneMonthAgo);
+  // 明细展示全部会话（按 lastActive 降序），不再用「近 N 天」过滤：
+  // 避免清空本地、从云端恢复的历史会话（大多 >31 天）在明细里完全不可见。
+  // 列表本身已分页(SESSION_PAGE)加载，全量渲染无性能问题。
+  const nextData = bySession;
   const maxTotal = nextData.reduce((m, s) => Math.max(m, s.total), 1);
 
   // 定时刷新（preserve）且已经渲染过分页：保留已加载的分页与 DOM，
@@ -295,9 +297,7 @@ function renderSessions(bySession, opts = {}) {
     _sessData = nextData;
     _sessMaxTotal = maxTotal;
     if (hint) {
-      hint.textContent = _sessData.length === bySession.length
-        ? `共 ${_sessData.length} 个会话（近一个月）`
-        : `近一个月 ${_sessData.length} 个会话（全部 ${bySession.length} 个）`;
+      hint.textContent = `共 ${_sessData.length} 个会话`;
     }
     updateSessionSentinel();
     return;
@@ -312,9 +312,7 @@ function renderSessions(bySession, opts = {}) {
   if (_sessObserver) { _sessObserver.disconnect(); _sessObserver = null; }
 
   if (hint) {
-    hint.textContent = _sessData.length === bySession.length
-      ? `共 ${_sessData.length} 个会话（近一个月）`
-      : `近一个月 ${_sessData.length} 个会话（全部 ${bySession.length} 个）`;
+      hint.textContent = `共 ${_sessData.length} 个会话`;
   }
 
   // 近一个月内无任何会话

@@ -3,7 +3,7 @@
 // 去重：依赖 (user_id, client_id) 服务端唯一约束 + 本地 clientId 索引
 
 import { getApiBase, getSession } from './auth.js';
-import { getRecordsAfterId, importRecords, countAllRecords } from './db.js';
+import { getRecordsAfterId, importRecords, countAllRecords, getMaxServerCreatedAt } from './db.js';
 
 const SYNC_STATE_KEY = 'ttw_sync_state';
 const DEVICE_ID_KEY = 'ttw_device_id';
@@ -110,8 +110,10 @@ export async function pull() {
   if (!session || !apiBase) throw new Error('未登录或未配置后端地址');
 
   const deviceId = await getDeviceId();
-  const state = await getSyncState();
-  let since = state.lastPullServerTs;
+  // 水位线直接取「本地最新记录的服务端接收时间」，而非持久化的上一次拉取游标：
+  // 这样清空本地数据（无论经应用按钮还是 DevTools）后无记录 → since=0 → 自动全量拉取，
+  // 不再依赖易失的 ttw_sync_state.lastPullServerTs。
+  let since = await getMaxServerCreatedAt();
   let totalImported = 0;
   let totalSkipped = 0;
 
