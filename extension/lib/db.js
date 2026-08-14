@@ -357,8 +357,9 @@ export async function getSummary() {
   const bySessionArr = Object.values(bySession).sort((a, b) => b.lastActive - a.lastActive);
 
   // 缓存命中率统计
-  // 命中率 = cachedTokens / (inputTokens + cachedTokens)
-  // （缓存命中的 token 本应计入 input，命中率反映 prompt 中有多少比例命中缓存）
+  // 命中率 = cachedTokens / inputTokens
+  // （真实样本确认 input_token 为「含缓存命中的总 prompt」，缓存命中是它的子集，
+  //   故分母直接用 input，不再加 cached，避免分母双算把命中率压到近一半）
   const cacheStats = {
     overall: computeCacheRate(buckets.all.input, buckets.all.cached),
     today: computeCacheRate(buckets.today.input, buckets.today.cached),
@@ -383,7 +384,7 @@ export async function getSummary() {
 }
 
 function computeCacheRate(input, cached) {
-  const denom = (input || 0) + (cached || 0);
+  const denom = input || 0;
   if (denom === 0) return 0;
   return (cached || 0) / denom;
 }

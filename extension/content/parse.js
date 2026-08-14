@@ -56,7 +56,8 @@
       const cacheRead = pickNum(extra, ['cache_read_token', 'cache_read_tokens', 'prompt_cache_hit_tokens']);
       const cacheWrite = pickNum(extra, ['cache_write_token', 'cache_write_tokens']);
       if (input != null || output != null) {
-        const total = (input || 0) + (output || 0) + (cacheRead || 0) + (cacheWrite || 0);
+        // input_token 已含缓存命中（cache_read/cache_write 是其子集），故 total 不再重复累加缓存
+        const total = (input || 0) + (output || 0);
         const usage = validateUsage({
           inputTokens: input || 0,
           outputTokens: output || 0,
@@ -119,7 +120,8 @@
     if (input == null && output == null && total == null) return null;
     const result = {
       inputTokens: input || 0, outputTokens: output || 0, cachedTokens: cached || 0,
-      totalTokens: total || (input || 0) + (output || 0) + (cached || 0) + (cacheWrite || 0),
+      // input（如 prompt_tokens）已含缓存命中，故 total 不再重复累加缓存
+      totalTokens: total || (input || 0) + (output || 0),
     };
     if (cacheWrite != null && cacheWrite > 0) result.cacheWriteTokens = cacheWrite;
     return validateUsage(result);

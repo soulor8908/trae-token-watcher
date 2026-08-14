@@ -37,7 +37,7 @@ test('extractUsage: TRAE get_session_usage 结构（extra_info + 单数字段）
   assert.equal(usage.outputTokens, 50);
   assert.equal(usage.cachedTokens, 20);
   assert.equal(usage.cacheWriteTokens, 5);
-  assert.equal(usage.totalTokens, 175); // 100+50+20+5
+  assert.equal(usage.totalTokens, 150); // input(100)+output(50)，input 已含 cache_read(20)/cache_write(5)
   assert.equal(usage.model, 'DeepSeek-V3');
   assert.equal(usage.conversationId, 'abcd1234abcd1234');
   assert.equal(usage.credits, 1.5);

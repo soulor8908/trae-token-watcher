@@ -26,9 +26,10 @@ function shortModel(model) {
   return model.length > 24 ? model.slice(0, 24) + '…' : model;
 }
 
-// 缓存命中率 = cachedTokens / (inputTokens + cachedTokens)，与 db.js computeCacheRate 保持一致
+// 缓存命中率 = cachedTokens / inputTokens，与 db.js computeCacheRate 保持一致
+// （真实样本确认 input_token 已含缓存命中，命中率 = 缓存命中 / 总 prompt）
 function cacheRateOf(input, cached) {
-  const denom = (input || 0) + (cached || 0);
+  const denom = input || 0;
   if (denom <= 0) return null;
   return cached / denom;
 }
@@ -39,7 +40,7 @@ function cacheRateChip(input, cached) {
   if (rate == null) return '';
   const pct = Math.round(rate * 100);
   const cls = rate >= 0.5 ? 'hi' : rate >= 0.2 ? 'mid' : 'lo';
-  return `<span class="tok cache-rate ${cls}" title="缓存命中率 = 缓存 / (输入+缓存) = ${pct}%">♻${pct}%</span>`;
+  return `<span class="tok cache-rate ${cls}" title="缓存命中率 = 缓存 / 输入 = ${pct}%">♻${pct}%</span>`;
 }
 
 function sendMessage(type, payload) {
