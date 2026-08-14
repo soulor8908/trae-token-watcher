@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateToken, hashToken } from '../src/session.js';
-import { httpError, buildAuthorizeUrl, encryptToken, decryptToken } from '../src/github.js';
+import { buildAuthorizeUrl, encryptToken, decryptToken } from '../src/github.js';
+import { httpError } from '../src/http.js';
 
 test('generateToken: 64位hex', () => {
   const t = generateToken();

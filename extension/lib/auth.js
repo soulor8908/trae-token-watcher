@@ -99,6 +99,8 @@ export async function refreshAuthStatus() {
   try {
     const resp = await fetch(`${apiBase.replace(/\/$/, '')}/auth/status`, {
       headers: { Authorization: `Bearer ${session.token}` },
+      // 超时兜底：后端慢/挂起时 5s 后 reject，走下方 catch 返回本地缓存，不阻塞调用方
+      signal: AbortSignal.timeout(5000),
     });
     if (!resp.ok) {
       if (resp.status === 401) await clearSession();
@@ -136,6 +138,8 @@ export async function refreshStarStatus() {
     const resp = await fetch(`${apiBase.replace(/\/$/, '')}/auth/refresh-star`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${session.token}` },
+      // 超时兜底：后端慢/挂起时 5s 后 reject，走下方 catch 返回本地缓存，不阻塞调用方
+      signal: AbortSignal.timeout(5000),
     });
     if (!resp.ok) {
       if (resp.status === 401) await clearSession();

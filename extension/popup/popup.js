@@ -1,5 +1,5 @@
 // Popup 仪表盘逻辑 — 渲染统计、趋势、记录；AI 诊断（路径 A 优先，回退 B）
-import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison, addDiagnosis, getDiagnoses, deleteDiagnosis, clearDiagnoses } from '../lib/db.js';
+import { getSummary, getAllRecords, predictUsage, checkAlert, getComparison, getDataState, addDiagnosis, getDiagnoses, deleteDiagnosis, clearDiagnoses } from '../lib/db.js';
 import { loginWithGitHub, logout, refreshAuthStatus, refreshStarStatus, getSession, getApiBase, diagnose as diagnoseViaApi } from '../lib/auth.js';
 
 // ---------- 工具函数 ----------
@@ -54,8 +54,22 @@ let cachedSummary = null;
 let modelMetric = 'tokens'; // 'tokens' | 'cost'
 
 let _rendering = false;
-async function renderSummary() {
+// 上次渲染时的数据指纹：数据未变且未跨天则跳过固定 15s 兜底的全量重绘
+let _lastDataState = null;
+async function renderSummary(force = false) {
   if (_rendering) return; // 防止事件驱动刷新与定时轮询并发重入
+  // 非强制刷新（15s 兜底轮询）：用轻量指纹判断数据是否变化，未变化则跳过 DOM 重渲染
+  if (!force && _lastDataState) {
+    const state = await getDataState();
+    if (
+      state.maxUsageTime === _lastDataState.maxUsageTime &&
+      state.totalCount === _lastDataState.totalCount &&
+      state.dayKey === _lastDataState.dayKey
+    ) {
+      return; // 数据没变也没跨天，无需重绘
+    }
+    _lastDataState = state;
+  }
   _rendering = true;
   try {
   const summary = await getSummary();
@@ -103,6 +117,7 @@ async function renderSummary() {
   // 预警检查
   renderAlert(await checkAlert());
   } finally {
+    _lastDataState = await getDataState(); // 渲染完成，记录当前数据指纹
     _rendering = false;
   }
 }
@@ -1063,7 +1078,7 @@ async function renderAccount() {
 }
 
 // ---------- 事件绑定 ----------
-document.getElementById('refreshBtn').addEventListener('click', renderSummary);
+document.getElementById('refreshBtn').addEventListener('click', () => renderSummary(true));
 document.getElementById('diagBtn').addEventListener('click', diagnose);
 
 // 打开设置页
@@ -1126,7 +1141,7 @@ document.getElementById('widgetBtn').addEventListener('click', async () => {
 let _pingTimer = null;
 function scheduleSummaryRefresh() {
   if (_pingTimer) clearTimeout(_pingTimer);
-  _pingTimer = setTimeout(() => { _pingTimer = null; renderSummary(); }, 800);
+  _pingTimer = setTimeout(() => { _pingTimer = null; renderSummary(true); }, 800); // 事件驱动：数据已变，强制渲染
 }
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.ttw_usage_ping) {
@@ -1176,9 +1191,10 @@ document.getElementById('modelToggle').addEventListener('click', (e) => {
   }
   await loadDiagDefaultMode();
   await loadWidgetState();
-  await renderAccount();
-  await renderSummary();
-  await renderDiagHistory();
+  // 账号区渲染依赖后端网络请求，与本地数据渲染并行执行、互不阻塞；
+  // refreshAuthStatus/refreshStarStatus 内部已有超时 + 本地缓存兜底，失败不影响本地仪表盘。
+  renderAccount().catch(() => {});
+  await Promise.all([renderSummary(), renderDiagHistory()]);
   // 事件驱动刷新为主（ttw_usage_ping），15s 轮询仅作兜底，降低 IDB 负载
   setInterval(renderSummary, 15000);
 })();

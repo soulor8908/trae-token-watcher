@@ -1,6 +1,8 @@
 // GitHub API 封装 — OAuth 换 token + 用户信息 + Star 检查
 // 失败优雅：所有调用抛出带状态码的错误，由上层捕获
 
+import { httpError } from './http.js';
+
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_OAUTH = 'https://github.com/login/oauth';
 
@@ -76,9 +78,11 @@ export async function checkStarred(accessToken, owner, repo) {
 // 当前登录流程已强制持久化 access_token，Star 回查一律走 checkStarred（精确端点）。
 
 // ---------- access_token 加密存储（AES-GCM）----------
-// 密钥由 SESSION_SECRET 经 SHA-256 派生；secret 变更后旧密文不可解，需重新登录
+// 密钥由 TOKEN_ENCRYPTION_KEY 经 SHA-256 派生；未配置时回退到 SESSION_SECRET（兼容旧数据）。
+// 与 session 哈希解耦：轮换 SESSION_SECRET 不影响已存 token；轮换 TOKEN_ENCRYPTION_KEY 后旧密文不可解，需重新登录。
 async function deriveAesKey(env) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(env?.SESSION_SECRET || ''));
+  const secret = env?.TOKEN_ENCRYPTION_KEY || env?.SESSION_SECRET || '';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
@@ -118,11 +122,4 @@ export function buildAuthorizeUrl(env, state, redirectUri) {
     state,
   });
   return `${GITHUB_OAUTH}/authorize?${params.toString()}`;
-}
-
-// 工具：构造 HTTP 错误
-export function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
 }

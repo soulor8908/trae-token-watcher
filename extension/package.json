@@ -1,0 +1,14 @@
+{
+  "name": "trae-token-watcher-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trae Token Watcher 浏览器扩展 — 本地测试脚本（不影响浏览器加载，浏览器按 manifest 加载经典/模块脚本）",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/parse.test.mjs test/db.test.mjs",
+    "lint": "node scripts/lint.js"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0"
+  }
+}

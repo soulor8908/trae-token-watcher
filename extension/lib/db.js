@@ -2,15 +2,38 @@
 // 数据流要短：content -> background -> IndexedDB；popup 直读 IndexedDB
 
 const DB_NAME = 'trae-token-watcher';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE_RECORDS = 'usage-records';
 const STORE_DIAGNOSES = 'diagnoses';
 
 // getSummary 只加载近 N 天记录（覆盖月桶 + 14 天趋势），走 timestamp 索引范围查询，
 // 避免每次刷新都 getAllRecords(2000) 全量扫描，降低 IDB 与主线程负载。
-const SUMMARY_WINDOW_DAYS = 31;  // 历史取数已改为全量(getRecordsSince(0))，此常量保留供趋势/未来窗口配置参考，不再用于取数截断
-
 let _dbPromise = null;
+
+// ---------- 聚合结果内存缓存 ----------
+// getSummary / getComparison 各做一次全量/大窗口扫描，而 popup 渲染会频繁触发。
+// 加 TTL 缓存复用结果；任何数据写入（addRecord/importRecords/clear）都会通过
+// invalidateAggregates() 立即失效，保证「数据一变就重算、没变就复用」。
+let _summaryCache = null;
+let _comparisonCache = null;
+const SUMMARY_TTL_MS = 5000;    // 摘要含今日/跨天桶，5s 内复用足够
+const COMPARISON_TTL_MS = 60000; // 周期对比为日级数据，60s 复用足够
+// 数据版本号：每次写入自增，供 popup 判断是否需要重渲染（避免固定 15s 全量重绘）
+let _dataVersion = 0;
+
+function invalidateAggregates() {
+  _summaryCache = null;
+  _comparisonCache = null;
+  _predictCache = { ts: 0, data: null };
+  _dataVersion++;
+}
+
+// 轻量数据指纹：仅做索引范围 count + 末条读取，远比 getSummary 全量扫描便宜。
+// popup 的 15s 兜底轮询用它判断「数据是否变化」，未变化则跳过 DOM 重渲染。
+export async function getDataState() {
+  const [maxUsageTime, totalCount] = await Promise.all([getMaxUsageTime(), countRecordsSince(0)]);
+  return { maxUsageTime, totalCount, dayKey: dayKeyOf(Date.now()) };
+}
 
 // 单例连接：IndexedDB 打开是异步且有开销，复用同一个连接，避免每次读写都 open/close
 function openDB() {
@@ -27,7 +50,8 @@ function openDB() {
           autoIncrement: true,
         });
         store.createIndex('timestamp', 'timestamp', { unique: false });
-        store.createIndex('conversationId', 'conversationId', { unique: false });
+        // v5 起 conversationId 为唯一索引：同一会话只保留最新一条，从数据库层面防重复
+        store.createIndex('conversationId', 'conversationId', { unique: true });
         store.createIndex('model', 'model', { unique: false });
         store.createIndex('clientId', 'clientId', { unique: false });
         store.createIndex('serverCreatedAt', 'serverCreatedAt', { unique: false });
@@ -68,6 +92,42 @@ function openDB() {
           store.createIndex('serverCreatedAt', 'serverCreatedAt', { unique: false });
         }
       }
+
+      // v4 → v5：conversationId 改为唯一索引。
+      // 先清理重复（同一会话只保留 timestamp 最新的一条），再重建唯一索引，
+      // 否则旧库中已有重复会话会导致唯一索引创建抛 ConstraintError、升级失败。
+      if (e.oldVersion < 5 && db.objectStoreNames.contains(STORE_RECORDS)) {
+        const store = e.target.transaction.objectStore(STORE_RECORDS);
+        if (store.indexNames.contains('conversationId')) {
+          store.deleteIndex('conversationId');
+        }
+        const keepKey = new Map(); // cid -> { key, ts }：保留 timestamp 最大的一条
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (cursor) {
+            const rec = cursor.value;
+            const cid = rec.conversationId;
+            if (cid) {
+              const ex = keepKey.get(cid);
+              if (!ex) {
+                keepKey.set(cid, { key: cursor.key, ts: rec.timestamp || 0 });
+              } else if ((rec.timestamp || 0) > ex.ts) {
+                // 当前记录更新：删掉之前保留的，保留当前
+                store.delete(ex.key);
+                keepKey.set(cid, { key: cursor.key, ts: rec.timestamp || 0 });
+              } else {
+                // 之前保留的更新：删掉当前
+                cursor.delete();
+              }
+            }
+            cursor.continue();
+          } else {
+            // 遍历完，重建唯一索引（此时每 cid 仅一条，安全）
+            store.createIndex('conversationId', 'conversationId', { unique: true });
+          }
+        };
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => {
@@ -87,8 +147,8 @@ function genClientId() {
 }
 
 // 写入一条用量记录
-// 去重：对带 conversationId（即 session_id）的记录采用覆盖式去重——同一会话只保留最新一条，
-// 旧记录先删后插；历史会话反复查看、实时会话多轮对话都不会再产生重复。
+// 去重：带 conversationId（即 session_id）的记录，利用 v5 唯一索引定向删除旧快照后写入，
+// 同一会话只保留最新一条（O(log n) 定向删除，替代原先 openCursor 遍历删除所有旧记录）。
 // 无 conversationId 的实时请求保持原行为（每条都入库）。
 export async function addRecord(record) {
   const db = await openDB();
@@ -113,27 +173,26 @@ export async function addRecord(record) {
     const tryInsert = () => {
       const req = store.add(finalRecord);
       req.onsuccess = () => {
-        _predictCache = { ts: 0, data: null }; // 数据已变，使预测缓存失效
+        invalidateAggregates(); // 数据已变，使聚合/预测缓存失效
         resolve(req.result);
       };
       req.onerror = () => reject(req.error);
     };
 
     if (finalRecord.conversationId) {
-      // 纯 session_id 去重：同一会话只保留最新一条记录（覆盖式写入）。
-      // 历史会话反复查看、或实时会话多轮对话，都折叠为该 session_id 下的单条最新快照。
+      // 唯一索引定向删除旧快照：getKey 返回该会话此前那条记录的主键，删除后写入最新一条
       const idx = store.index('conversationId');
-      const curReq = idx.openCursor(IDBKeyRange.only(finalRecord.conversationId));
-      curReq.onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-          cursor.delete(); // 删除该会话已有的旧记录
-          cursor.continue();
+      const keyReq = idx.getKey(finalRecord.conversationId);
+      keyReq.onsuccess = () => {
+        if (keyReq.result != null) {
+          const delReq = store.delete(keyReq.result);
+          delReq.onsuccess = () => tryInsert();
+          delReq.onerror = () => reject(delReq.error);
         } else {
-          tryInsert(); // 旧的都删完了，写入最新一条
+          tryInsert();
         }
       };
-      curReq.onerror = () => tryInsert(); // 索引查询失败则直接插入
+      keyReq.onerror = () => tryInsert(); // 索引查询失败则直接插入
     } else {
       tryInsert();
     }
@@ -173,12 +232,15 @@ export async function countRecordsSince(since = 0) {
 }
 
 // 获取全部记录（限制条数，默认最近 500 条）
+// 排序：按真实用量时间 timestamp 索引降序，与「会话明细」的 lastActive 口径一致。
+// 不能用主键 self-increment 倒序——云端导入/历史补采会拿到新 id 但旧 timestamp，导致错位。
 export async function getAllRecords(limit = 500) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_RECORDS, 'readonly');
     const store = tx.objectStore(STORE_RECORDS);
-    const req = store.openCursor(null, 'prev');
+    const idx = store.index('timestamp');
+    const req = idx.openCursor(null, 'prev'); // 按真实时间倒序
     const results = [];
     req.onsuccess = (e) => {
       const cursor = e.target.result;
@@ -197,6 +259,9 @@ export async function getAllRecords(limit = 500) {
 // 聚合统计：按时间段汇总 token 用量
 export async function getSummary() {
   const now = Date.now();
+  if (_summaryCache && now - _summaryCache.ts < SUMMARY_TTL_MS) {
+    return _summaryCache.data;
+  }
   const dayMs = 24 * 60 * 60 * 1000;
   // 取全量记录：用索引范围查询（下限 0 = 全表，不被 2000 截断），覆盖全部历史。
   // 这样 all / bySession / byModel 聚合的是真实全量；趋势图展示时仍 slice(-14)，
@@ -305,7 +370,7 @@ export async function getSummary() {
     })).filter((m) => m.cached > 0 || m.input > 0),
   };
 
-  return {
+  const summaryResult = {
     buckets,
     trend: trendArr,
     byModel: byModelArr,
@@ -313,6 +378,8 @@ export async function getSummary() {
     cacheStats,
     totalRecords: records.length,
   };
+  _summaryCache = { ts: now, data: summaryResult };
+  return summaryResult;
 }
 
 function computeCacheRate(input, cached) {
@@ -547,6 +614,9 @@ export async function checkAlert() {
 // 返回每个周期的 tokens/credits/count 及环比变化百分比
 export async function getComparison() {
   const now = Date.now();
+  if (_comparisonCache && now - _comparisonCache.ts < COMPARISON_TTL_MS) {
+    return _comparisonCache.data;
+  }
   const dayMs = 86400000;
   // 取近 60 天记录足够覆盖本月+上月对比
   const records = await getRecordsSince(now - 61 * dayMs);
@@ -588,7 +658,9 @@ export async function getComparison() {
     };
   });
 
-  return { ranges: result };
+  const comparisonResult = { ranges: result };
+  _comparisonCache = { ts: now, data: comparisonResult };
+  return comparisonResult;
 }
 
 function pctChange(prev, cur) {
@@ -603,7 +675,10 @@ export async function clearAllRecords() {
     const tx = db.transaction(STORE_RECORDS, 'readwrite');
     const store = tx.objectStore(STORE_RECORDS);
     const req = store.clear();
-    req.onsuccess = () => resolve(true);
+    req.onsuccess = () => {
+      invalidateAggregates(); // 清空数据，使聚合/预测缓存失效及版本自增
+      resolve(true);
+    };
     req.onerror = () => reject(req.error);
     // 复用单例连接，事务结束不关闭
   });
@@ -772,6 +847,9 @@ export async function getRecordsAfterId(localId = 0, limit = 500) {
 
 // 批量导入记录（下载用）：按 clientId 去重，已存在则跳过
 // records: [{ clientId, ts, model, ... }]（server_created_at 字段会被忽略）
+// 注意：同一批次内若含重复 clientId，必须在应用层去重——IDB 的 idx.getKey 是异步的，
+// 前一条插入尚未提交时，后一条同 cid 的检查会误判为不存在而重复写入。故用 seen 集合
+// 先过滤本批次内的重复 cid，再逐个查库。
 export async function importRecords(records) {
   if (!records || records.length === 0) return { imported: 0, skipped: 0 };
   const db = await openDB();
@@ -781,11 +859,12 @@ export async function importRecords(records) {
     const idx = store.index('clientId');
     let imported = 0;
     let skipped = 0;
+    const seen = new Set(); // 本批次内已处理的 clientId，防同批同 cid 重复写入
 
     // 事务顶层一次性解析：无论有无 IDB 请求（全 skipped 时事务为空也会 oncomplete），
     // 都能在事务结束时拿到最终计数。避免按 pending 计数在循环内赋值 oncomplete 导致挂起。
     tx.oncomplete = () => {
-      _predictCache = { ts: 0, data: null }; // 批量导入改变数据，使预测缓存失效
+      invalidateAggregates(); // 批量导入改变数据，使聚合/预测缓存失效及版本自增
       resolve({ imported, skipped });
     };
     tx.onerror = () => reject(tx.error);
@@ -793,6 +872,8 @@ export async function importRecords(records) {
     for (const r of records) {
       const cid = r.clientId || r.client_id;
       if (!cid) { skipped++; continue; }
+      if (seen.has(cid)) { skipped++; continue; } // 本批次内已出现过，跳过
+      seen.add(cid);
       const checkReq = idx.getKey(cid);
       checkReq.onsuccess = () => {
         if (checkReq.result == null) {

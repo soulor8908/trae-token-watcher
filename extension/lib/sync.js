@@ -22,7 +22,7 @@ export async function getDeviceId() {
 // 读取同步状态
 async function getSyncState() {
   const { [SYNC_STATE_KEY]: state } = await chrome.storage.local.get(SYNC_STATE_KEY);
-  return state || { lastSyncedLocalId: 0, lastPullServerTs: 0, lastSyncAt: 0 };
+  return state || { lastSyncedLocalId: 0, lastSyncAt: 0 };
 }
 
 async function setSyncState(patch) {
@@ -134,7 +134,6 @@ export async function pull() {
     totalSkipped += result.skipped;
 
     since = data.latest_server_ts;
-    await setSyncState({ lastPullServerTs: since });
 
     // 汇报游标
     fetch(`${apiBase.replace(/\/$/, '')}/api/sync/cursor`, {
@@ -210,13 +209,13 @@ export async function resetRemote() {
     throw new Error(err.error || `重置失败 ${resp.status}`);
   }
   // 同时重置本地同步游标
-  await setSyncState({ lastSyncedLocalId: 0, lastPullServerTs: 0 });
+  await setSyncState({ lastSyncedLocalId: 0 });
   return { ok: true };
 }
 
 // 重置本地同步游标（清空本地数据后调用，让下次全量同步）
 export async function resetLocalCursor() {
-  await setSyncState({ lastSyncedLocalId: 0, lastPullServerTs: 0 });
+  await setSyncState({ lastSyncedLocalId: 0 });
 }
 
 // 读取自动同步开关

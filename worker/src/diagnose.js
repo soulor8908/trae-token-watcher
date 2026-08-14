@@ -3,16 +3,32 @@
 // 只接收聚合统计，不含对话内容
 
 import { getTodayQuota, incrementQuota } from './db.js';
-import { httpError } from './github.js';
+import { httpError, json, sha256 } from './http.js';
+import { rateLimit } from './rateLimit.js';
 
 const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 
-const SYSTEM_PROMPT = `你是 TRAE Work 的 Token 优化专家。用户会提供聚合后的 Token 用量统计（不含对话内容）。
+// quick 模式：快速诊断，简洁、字数少
+const QUICK_SYSTEM_PROMPT = `你是 TRAE Work 的 Token 优化专家。用户会提供聚合后的 Token 用量统计（不含对话内容）。
 请用简洁的中文给出诊断，格式如下：
 1. 一句话总结现状
 2. 2-3 条关键发现（用要点列出）
 3. 3 条可立即执行的具体优化建议（按优先级排序）
 保持简洁，总字数控制在 300 字以内。`;
+
+// deep 模式：深度诊断，结构更完整、给出量化依据与可落地方案
+const DEEP_SYSTEM_PROMPT = `你是 TRAE Work 的 Token 优化专家。用户会提供聚合后的 Token 用量统计（不含对话内容）。
+请用中文给出深入的诊断报告，格式如下：
+1. 现状总览：一句话概括整体用量特征
+2. 关键发现：3-5 条，逐条给出「现象 → 可能成因」的推断，尽量引用统计中的具体数值
+3. 优化建议：4-6 条，按优先级排序，每条给出「具体动作 → 预期收益」
+4. 风险提示：对可能被忽略的异常项（如某模型用量异常高、缓存率偏低）单独指出
+分析要具体、可执行，避免泛泛而谈；总字数控制在 800 字以内。`;
+
+// 依据用户选择的模式选择提示词
+function pickSystemPrompt(mode) {
+  return mode === 'deep' ? DEEP_SYSTEM_PROMPT : QUICK_SYSTEM_PROMPT;
+}
 
 // POST /api/diagnose
 // body: { stats: "聚合统计文本" }
@@ -33,6 +49,13 @@ export async function handleDiagnose(request, env, session) {
     throw httpError(400, '缺少 stats 字段');
   }
   const stats = String(body.stats).slice(0, 4000); // 限制长度，防滥用
+  const mode = body.mode === 'deep' ? 'deep' : 'quick';
+
+  // 短周期限流：防止瞬间打爆 DeepSeek（固定窗口，默认 10 次 / 15 分钟）
+  const rl = await rateLimit(env, `diag:${session.user_id}`, parseInt(env.DIAG_RATE_LIMIT || 10) || 10, 900);
+  if (!rl.allowed) {
+    throw httpError(429, '诊断请求过于频繁，请稍后再试');
+  }
 
   // 限流：每天 10 次
   const { count } = await getTodayQuota(env.DB, session.user_id);
@@ -41,20 +64,21 @@ export async function handleDiagnose(request, env, session) {
     throw httpError(429, `今日免费诊断已用完（${quota} 次/天），请明天再来或使用自有 API Key`);
   }
 
-  // 缓存：相同 stats 文本的诊断结果缓存 1h
-  const cacheKey = `diag:${await sha256(stats)}`;
+  // 缓存：相同 stats + mode 文本的诊断结果缓存 1h
+  const cacheKey = `diag:${mode}:${await sha256(stats)}`;
   const cached = await env.KV.get(cacheKey);
   if (cached) {
     return json({
       result: cached,
       cached: true,
+      mode,
       quotaUsed: count,
       quotaTotal: quota,
     });
   }
 
   // 转发 DeepSeek
-  const result = await callDeepSeek(env, stats);
+  const result = await callDeepSeek(env, stats, pickSystemPrompt(mode));
 
   // 缓存结果
   await env.KV.put(cacheKey, result, {
@@ -67,6 +91,7 @@ export async function handleDiagnose(request, env, session) {
   return json({
     result,
     cached: false,
+    mode,
     quotaUsed: count + 1,
     quotaTotal: quota,
   });
@@ -92,7 +117,7 @@ function sleep(ms) {
 
 // 调用 DeepSeek API（带超时 + 有限重试）
 // 仅对「网络错误 / 超时 / 5xx」重试；4xx（含 401/429）视为终态，直接报错不重试
-async function callDeepSeek(env, stats) {
+async function callDeepSeek(env, stats, systemPrompt) {
   let lastErr;
   for (let attempt = 0; attempt <= DEEPSEEK_MAX_RETRIES; attempt++) {
     try {
@@ -105,7 +130,7 @@ async function callDeepSeek(env, stats) {
         body: JSON.stringify({
           model: 'deepseek-chat',
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: stats },
           ],
           temperature: 0.7,
@@ -140,16 +165,4 @@ async function callDeepSeek(env, stats) {
     }
   }
   throw httpError(502, `DeepSeek 调用失败: ${lastErr?.message || '未知错误'}`);
-}
-
-async function sha256(text) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }

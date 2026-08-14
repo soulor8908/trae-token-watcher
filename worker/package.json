@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "node --test test/worker.test.js test/sync.test.js",
+    "lint": "node scripts/lint.js",
     "db:init": "wrangler d1 execute trae-token-watcher-db --file=./schema.sql",
     "db:init:remote": "wrangler d1 execute trae-token-watcher-db --remote --file=./schema.sql",
     "kv:create": "wrangler kv namespace create KV",

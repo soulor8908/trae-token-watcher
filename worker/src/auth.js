@@ -1,9 +1,10 @@
 // OAuth 流程 — /auth/github 跳转 + /auth/callback 回调 + 状态查询
 // 流程：扩展打开 /auth/github?ext_id=xxx → GitHub 授权 → 回调换 token → 检查 Star → 签发 session → 重定向回扩展
 
-import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, encryptToken, decryptToken, httpError } from './github.js';
+import { buildAuthorizeUrl, exchangeCodeForToken, getUserInfo, checkStarred, encryptToken, decryptToken } from './github.js';
 import { upsertUser, saveGithubToken, getGithubToken, purgeExpiredSessions, deleteSession } from './db.js';
 import { issueSession, hashToken } from './session.js';
+import { httpError, json } from './http.js';
 
 // ---------- OAuth state 防篡改签名（HMAC-SHA256）----------
 // 用 SESSION_SECRET 对 state 负载签名，回调时校验，防止 state 被伪造 / OAuth CSRF
@@ -143,9 +144,7 @@ export async function getStarredWithCache(env, accessToken, userId) {
   }
 
   const starred = await checkStarred(accessToken, env.WATCH_REPO_OWNER, env.WATCH_REPO_NAME);
-  await env.KV.put(cacheKey, starred ? '1' : '0', {
-    expirationTtl: parseInt(starred ? env.STAR_CACHE_TTL : (env.STAR_MISS_CACHE_TTL || 60), 10),
-  });
+  await writeStarCache(env, userId, starred);
   return starred;
 }
 
@@ -229,11 +228,4 @@ export async function handleAuthLogout(env, session, request) {
   const tokenHash = await hashToken(token, env);
   await deleteSession(env.DB, tokenHash);
   return json({ ok: true });
-}
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }

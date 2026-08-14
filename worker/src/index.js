@@ -5,7 +5,7 @@ import { handleAuthStart, handleAuthCallback, handleAuthStatus, handleAuthLogout
 import { handleDiagnose } from './diagnose.js';
 import { handleSyncPush, handleSyncPull, handleSyncStatus, handleSyncCursor, handleSyncReset } from './sync.js';
 import { verifySession } from './session.js';
-import { httpError } from './github.js';
+import { json, httpError } from './http.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -131,13 +131,6 @@ function corsHeaders(request, env) {
   // 不允许的来源不泄露 Allow-Origin（避免被当作通配符滥用）
   if (!origin) delete headers['Access-Control-Allow-Origin'];
   return headers;
-}
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 // OAuth 完成页 — 扩展 background 通过 chrome.tabs.onUpdated 提取 URL query params

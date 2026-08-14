@@ -3,11 +3,9 @@
   "name": "Trae Token Watcher",
   "version": "0.1.0",
   "description": "监控 TRAE Work Token 消耗，AI 驱动积分优化建议",
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "downloads", "alarms", "notifications"],
+  "permissions": ["storage", "tabs", "downloads", "alarms", "notifications"],
   "host_permissions": [
     "https://*.trae.cn/*",
-    "https://*.volces.com/*",
-    "https://ark.cn-beijing.volces.com/*",
     "https://api.deepseek.com/*"
   ],
   "background": {
@@ -17,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.trae.cn/*"],
-      "js": ["content/inject.js"],
+      "js": ["content/parse.js", "content/inject.js"],
       "world": "MAIN",
       "run_at": "document_start",
       "all_frames": true

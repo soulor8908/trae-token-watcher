@@ -15,16 +15,20 @@ binding = "KV"
 id = "72864e45c2164530b082fc304d558d9a"
 
 # Secrets（通过 wrangler secret put 设置，不要写在这里）:
-#   GITHUB_CLIENT_ID     — GitHub OAuth App Client ID
-#   GITHUB_CLIENT_SECRET — GitHub OAuth App Client Secret
-#   DEEPSEEK_API_KEY     — 后端转发诊断用的 DeepSeek Key
-#   SESSION_SECRET       — session token 签名密钥（32+ 字节随机串）
+#   GITHUB_CLIENT_ID       — GitHub OAuth App Client ID
+#   GITHUB_CLIENT_SECRET   — GitHub OAuth App Client Secret
+#   DEEPSEEK_API_KEY       — 后端转发诊断用的 DeepSeek Key
+#   SESSION_SECRET         — session token 签名/哈希密钥（32+ 字节随机串）
+#   TOKEN_ENCRYPTION_KEY   — （推荐）GitHub access_token 的 AES-GCM 加密密钥，与 SESSION_SECRET 解耦；
+#                            未设置时回退用 SESSION_SECRET，建议新部署单独设置，这样轮换 SESSION_SECRET 不影响已存 token
 
 # 被监控的 GitHub 仓库（Star 即门票）
 [vars]
 WATCH_REPO_OWNER = "soulor8908"
 WATCH_REPO_NAME = "trae-token-watcher"
 DAILY_QUOTA = 10
+DIAG_RATE_LIMIT = 10        # 诊断短周期限流：10 次 / 15 分钟（KV 固定窗口）
+PUSH_RATE_LIMIT = 30        # 同步 push 限流：30 次 / 分钟（KV 固定窗口）
 STAR_CACHE_TTL = 86400       # Star 状态缓存 24h（秒，已 star 时生效）
 STAR_MISS_CACHE_TTL = 60     # 未 star 状态短缓存 60s，让用户 star 后能尽快刷新
 DIAG_CACHE_TTL = 3600        # 诊断结果缓存 1h（秒）

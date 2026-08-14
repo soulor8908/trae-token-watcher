@@ -2,7 +2,8 @@
 // 设计：记录不可变，用 (user_id, client_id) 去重；pull 按 server_created_at 增量
 // 所有路由需 session；登录即可用，无需 Star
 
-import { httpError } from './github.js';
+import { httpError, json } from './http.js';
+import { rateLimit } from './rateLimit.js';
 
 const MAX_BATCH = 500;       // 单次 push 上限
 const DEFAULT_PULL_LIMIT = 500;
@@ -11,6 +12,12 @@ const DEFAULT_PULL_LIMIT = 500;
 // body: { device_id, records: [{ client_id, ts, model, ... }] }
 export async function handleSyncPush(request, env, session) {
   if (!session) throw httpError(401, '未登录');
+
+  // 短周期限流：防止恶意/异常客户端持续灌数据（固定窗口，默认 30 次 / 分钟）
+  const rl = await rateLimit(env, `push:${session.user_id}`, parseInt(env.PUSH_RATE_LIMIT || 30) || 30, 60);
+  if (!rl.allowed) {
+    throw httpError(429, '同步过于频繁，请稍后再试');
+  }
 
   const body = await request.json().catch(() => null);
   if (!body || !Array.isArray(body.records)) {
@@ -206,10 +213,3 @@ function str(v) { return v == null ? null : String(v).slice(0, 2000); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0; }
 function flo(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, n) : 0; }
 function nowSec() { return Math.floor(Date.now() / 1000); }
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
