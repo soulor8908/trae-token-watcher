@@ -63,6 +63,10 @@
     total: 0, input: 0, output: 0, cached: 0,
     credits: 0, count: 0, lastModel: '', lastTokens: 0,
   };
+  // 本轮基线已计入「今日 Token」的会话，用于增量去重：页面被动采集 + 主动批量拉取会
+  // 重复上报同一会话，按 conversationId 去重避免浮窗「今日 Token」被虚增。实时记录
+  // （isHistorical=false）始终新增，不受此限制。每次 refreshWidgetData 重设为 DB 基线。
+  let baselineSessionIds = new Set();
   let refreshTimer = null;
 
   // 扩展被重新加载/更新后，已注入页面的 chrome.* 绑定会失效
@@ -396,6 +400,8 @@
       const resp = await chrome.runtime.sendMessage({ type: 'TTW_WIDGET_INIT' });
       if (resp && resp.summary) {
         todayData = resp.summary;
+        // 同步刷新基线会话集合：DB 已含这些会话，后续重复上报同一会话时据此去重
+        baselineSessionIds = new Set(resp.summary.sessionIds || []);
         renderWidget();
       }
     } catch (_) {}
@@ -414,6 +420,14 @@
         ? payload.timestamp
         : (payload.collectedAt || 0);
       if (ts < startOfDay(Date.now())) return;
+    }
+
+    // 增量去重：历史批量记录（isHistorical=true）若该会话已计入基线（页面被动采集 + 主动
+    // 批量拉取会重复上报同一会话），直接跳过，避免「今日 Token」被虚增；实时记录
+    // （isHistorical=false）始终新增。首次见到的历史会话也计入集合，防止后续重复上报。
+    if (payload.isHistorical && payload.conversationId) {
+      if (baselineSessionIds.has(payload.conversationId)) return;
+      baselineSessionIds.add(payload.conversationId);
     }
 
     todayData.total += payload.totalTokens || 0;

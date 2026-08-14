@@ -201,6 +201,9 @@ async function getWidgetSummary() {
   const records = await getRecordsSince(startOfDay(Date.now()));
   let total = 0, input = 0, output = 0, cached = 0, credits = 0;
   let lastModel = '', lastTokens = 0;
+  // 今日已计入基线的会话，供浮窗增量去重：页面被动采集 + 主动批量拉取会重复上报同一会话，
+  // 浮窗据此判断某条历史记录是否已计入基线，避免「今日 Token」被虚增。
+  const sessionIds = new Set();
 
   for (const r of records) {
     total += r.totalTokens || 0;
@@ -208,6 +211,7 @@ async function getWidgetSummary() {
     output += r.outputTokens || 0;
     cached += r.cachedTokens || 0;
     credits += r.credits || 0;
+    if (r.conversationId) sessionIds.add(r.conversationId);
   }
 
   // records 按时间戳升序，最后一条是最新的
@@ -217,7 +221,7 @@ async function getWidgetSummary() {
     lastTokens = last.totalTokens || 0;
   }
 
-  return { total, input, output, cached, credits, count: records.length, lastModel, lastTokens };
+  return { total, input, output, cached, credits, count: records.length, lastModel, lastTokens, sessionIds: [...sessionIds] };
 }
 
 function startOfDay(ts) {
